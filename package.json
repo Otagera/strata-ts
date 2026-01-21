@@ -1,0 +1,14 @@
+{
+  "devDependencies": {
+    "@biomejs/biome": "2.3.11",
+    "@types/bun": "latest",
+    "@types/node": "^25.0.9"
+  },
+  "name": "humble_file_ts",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
