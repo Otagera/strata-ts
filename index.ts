@@ -8,7 +8,7 @@ const ENCODING = "utf8";
 const DB_SENTINEL_VALUE = "$nullified";
 const db_map = new Map<string, number>();
 
-const database_init = async () => {
+export const database_init = async () => {
 	try {
 		const fileStream = createReadStream(FILENAME, { encoding: ENCODING });
 
@@ -32,6 +32,9 @@ const database_init = async () => {
 		await appendFile(FILENAME, "", ENCODING);
 	}
 };
+
+export const _reset_db_state = () => db_map.clear();
+export const _get_db_size = () => db_map.size;
 
 export const database_set = async (key: string, value: string) => {
 	const stats = await stat(FILENAME);
@@ -96,7 +99,7 @@ export const compaction = async () => {
 	}
 	fd.close();
 
-	rename(COMPACTION_FILENAME, FILENAME);
+	await rename(COMPACTION_FILENAME, FILENAME);
 	db_map.clear();
 	for (const [key, value] of new_db_map) {
 		db_map.set(key, value);
