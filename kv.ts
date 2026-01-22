@@ -6,10 +6,13 @@ import {
 	mkdir,
 	readdir,
 	readFile,
+	unlink,
+	rename,
 } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "readline/promises";
 import { BloomFilter } from "./bloom_filter";
+import { SSTCursor } from "./sst_cursor";
 
 // --- Interfaces ---
 interface SSTMetadata {
@@ -31,7 +34,11 @@ export class StrataKV {
 	private sst_files: SSTMetadata[] = [];
 	private mem_table = new Map<string, string>();
 
-	constructor() {}
+	constructor(config?: { dataDir?: string }) {
+		if (config?.dataDir) {
+			this.DATA_DIR = config.dataDir;
+		}
+	}
 
 	/**
 	 * Initializes the database by loading existing SSTable metadata from disk.
@@ -48,9 +55,9 @@ export class StrataKV {
 
 			this.sst_files = await Promise.all(
 				sorted_files.map(async (filename) => {
-						const meta = await this.get_file_meta(filename);
-						return { ...meta, filename };
-					})
+					const meta = await this.get_file_meta(filename);
+					return { ...meta, filename };
+				})
 			);
 		} catch (error) {
 			console.error("Initialization error:", error);
@@ -76,9 +83,9 @@ export class StrataKV {
 				if (key >= sst.minKey && key <= sst.maxKey) {
 					// Bloom Filter Check
 					if (sst.filter.contains(key)) {
-							found_value = await this.search_sst_file(sst.filename, key);
-							if (found_value !== null) break;
-						}
+						found_value = await this.search_sst_file(sst.filename, key);
+						if (found_value !== null) break;
+					}
 				}
 			}
 
@@ -94,7 +101,8 @@ export class StrataKV {
 	 */
 	public database_set = async (key: string, value: string) => {
 		this.mem_table.set(key, value);
-		if (this.mem_table.size >= this.MEMTABLE_LIMIT) await this.flush_mem_table();
+		if (this.mem_table.size >= this.MEMTABLE_LIMIT)
+			await this.flush_mem_table();
 	};
 
 	/**
@@ -102,7 +110,8 @@ export class StrataKV {
 	 */
 	public database_delete = async (key: string) => {
 		this.mem_table.set(key, this.DB_SENTINEL_VALUE);
-		if (this.mem_table.size >= this.MEMTABLE_LIMIT) await this.flush_mem_table();
+		if (this.mem_table.size >= this.MEMTABLE_LIMIT)
+			await this.flush_mem_table();
 	};
 
 	/**
@@ -133,8 +142,9 @@ export class StrataKV {
 
 		if (big_str && sorted_keys.length > 0) {
 			const timestamp = Date.now();
-			const filename = `sst_${timestamp}${this.SST_FILE_EXT}`;
-			const filename_meta = `sst_${timestamp}${this.SST_META_FILE_EXT}`;
+			const uniqueId = Math.random().toString(36).substring(2, 7);
+			const filename = `sst_${timestamp}_${uniqueId}${this.SST_FILE_EXT}`;
+			const filename_meta = `sst_${timestamp}_${uniqueId}${this.SST_META_FILE_EXT}`;
 
 			const minKey = sorted_keys[0] || "";
 			const maxKey = sorted_keys[sorted_keys.length - 1] || "";
@@ -215,8 +225,129 @@ export class StrataKV {
 		return stats.map((stat) => stat.filename);
 	};
 
+	/**
+	 * Merges all SSTables into a single new SSTable, removing tombstones and duplicates.
+	 */
 	public compaction = async () => {
-		// To be implemented
+		if (this.sst_files.length === 0) return;
+
+		// 1. Initialize cursors for all files
+		const sst_cursors = await Promise.all(
+			this.sst_files.map(async (file) => {
+				const cursor = new SSTCursor(
+					path.join(this.DATA_DIR, file.filename),
+					file.filename
+				);
+				await cursor.init();
+				return cursor;
+			})
+		);
+
+		// Prepare output
+		const timestamp = Date.now();
+		const uniqueId = Math.random().toString(36).substring(2, 7);
+		const output_filename = `sst_${timestamp}_${uniqueId}${this.SST_FILE_EXT}`;
+		const output_meta_filename = `sst_${timestamp}_${uniqueId}${this.SST_META_FILE_EXT}`;
+		const temp_output_path = path.join(this.DATA_DIR, "compaction.tmp");
+
+		const filter = new BloomFilter(128, 3);
+		let minKeyGlobal: string | null = null;
+		let maxKeyGlobal: string | null = null;
+		let hasData = false;
+
+		// 2. K-Way Merge Loop
+		while (sst_cursors.some((c) => !c.done)) {
+			// Find the smallest key among all cursors
+			let minKey: string | null = null;
+			for (const cursor of sst_cursors) {
+				if (!cursor.done) {
+					if (minKey === null || (cursor.key! < minKey)) {
+						minKey = cursor.key;
+					}
+				}
+			}
+
+			if (minKey === null) break; // Should not happen if check above is correct
+
+			// Find the "winner" for this key (the newest file)
+			// sst_files (and thus sst_cursors) are sorted Newest -> Oldest.
+			// So the first cursor that matches minKey is the winner.
+			let winnerCursor: SSTCursor | null = null;
+			
+			// We also need to identify ALL cursors that have this key to advance them later
+			const cursorsWithMinKey: SSTCursor[] = [];
+
+			for (const cursor of sst_cursors) {
+				if (!cursor.done && cursor.key === minKey) {
+					cursorsWithMinKey.push(cursor);
+					if (!winnerCursor) {
+						winnerCursor = cursor; // First match is newest
+					}
+				}
+			}
+
+			if (winnerCursor) {
+				const value = winnerCursor.value;
+				
+				// Write to output if it's not a tombstone
+				if (value !== this.DB_SENTINEL_VALUE) {
+					const line = `${minKey}:${value}\n`;
+					await appendFile(temp_output_path, line);
+					
+					filter.add(minKey!);
+					if (minKeyGlobal === null) minKeyGlobal = minKey;
+					maxKeyGlobal = minKey;
+					hasData = true;
+				}
+			}
+
+			// Advance ALL cursors that had the minKey
+			for (const cursor of cursorsWithMinKey) {
+				await cursor.advance();
+			}
+		}
+
+		// 3. Finalize
+		if (hasData) {
+			// Write metadata
+			await appendFile(
+				path.join(this.DATA_DIR, output_meta_filename),
+				JSON.stringify({
+					minKey: minKeyGlobal,
+					maxKey: maxKeyGlobal,
+					filterData: filter.serialize(),
+				})
+			);
+
+			// Rename temp file to final SST
+			await rename(temp_output_path, path.join(this.DATA_DIR, output_filename));
+
+			// Delete OLD files
+			for (const file of this.sst_files) {
+				await unlink(path.join(this.DATA_DIR, file.filename));
+				await unlink(path.join(this.DATA_DIR, file.filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT)));
+			}
+
+			// Update in-memory state
+			this.sst_files = [{
+				filename: output_filename,
+				minKey: minKeyGlobal!,
+				maxKey: maxKeyGlobal!,
+				filter: filter
+			}];
+		} else {
+			// If everything was tombstones and got deleted, we might end up with empty DB.
+			// Just delete old files.
+			for (const file of this.sst_files) {
+				await unlink(path.join(this.DATA_DIR, file.filename));
+				await unlink(path.join(this.DATA_DIR, file.filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT)));
+			}
+			this.sst_files = [];
+			// Clean up temp file if it was created (it might be empty)
+			// appendFile creates it even if empty string? No, usually.
+			// Check if exists before deleting? Or just try/catch unlink.
+			try { await unlink(temp_output_path); } catch (e) {}
+		}
 	};
 
 	// --- Debug & Test Tools ---

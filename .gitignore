@@ -35,5 +35,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # database files
 data/
+test_data/
 the_humble_file.txt
 compacted.txt
