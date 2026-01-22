@@ -4,7 +4,7 @@
     "@types/bun": "latest",
     "@types/node": "^25.0.9"
   },
-  "name": "humble_file_ts",
+  "name": "strata",
   "module": "index.ts",
   "type": "module",
   "private": true,

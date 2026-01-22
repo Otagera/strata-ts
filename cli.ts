@@ -1,18 +1,14 @@
 import { createInterface } from "readline/promises";
 import { stdin as input, stdout as output } from "process";
-import {
-	database_init,
-	database_set,
-	database_get,
-	database_delete,
-	database_close,
-} from "./index";
+import { StrataKV } from "./index";
 
 const rl = createInterface({ input, output });
 
 async function main() {
-	await database_init();
-	console.log("Humble DB CLI");
+	const db = new StrataKV();
+	await db.database_init();
+	
+	console.log("Strata DB CLI");
 	console.log("Commands: SET <key> <value>, GET <key>, DELETE <key>, EXIT");
 
 	while (true) {
@@ -29,7 +25,7 @@ async function main() {
 						console.log("Usage: SET <key> <value>");
 						break;
 					}
-					await database_set(key, value);
+					await db.database_set(key, value);
 					console.log("OK");
 					break;
 				case "GET":
@@ -37,7 +33,7 @@ async function main() {
 						console.log("Usage: GET <key>");
 						break;
 					}
-					const result = await database_get(key);
+					const result = await db.database_get(key);
 					console.log(result === null ? "(nil)" : result);
 					break;
 				case "DELETE":
@@ -45,18 +41,18 @@ async function main() {
 						console.log("Usage: DELETE <key>");
 						break;
 					}
-					await database_delete(key);
+					await db.database_delete(key);
 					console.log("OK");
 					break;
 				case "EXIT":
-					await database_close();
+					await db.database_close();
 					console.log("Bye!");
 					rl.close();
 					return;
 				default:
 					if (command) {
-                        console.log("Unknown command");
-                    }
+						console.log("Unknown command");
+					}
 			}
 		} catch (error) {
 			console.error("Error:", error);
