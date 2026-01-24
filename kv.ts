@@ -13,6 +13,9 @@ import path from "node:path";
 import { createInterface } from "readline/promises";
 import { BloomFilter } from "./bloom_filter";
 import { SSTCursor } from "./sst_cursor";
+import { writeFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
+import { constants } from "node:fs/promises";
 
 // --- Interfaces ---
 interface SSTMetadata {
@@ -27,17 +30,33 @@ export class StrataKV {
 	private DATA_DIR = "data";
 	private SST_FILE_EXT = ".sst";
 	private SST_META_FILE_EXT = ".meta.json";
+	private WAL_FILE = "wal.log";
 	private ENCODING: BufferEncoding = "utf8";
 	private DB_SENTINEL_VALUE = "$nullified";
 	private MEMTABLE_LIMIT = 5;
 	private COMPACTION_THRESHOLD = 5;
+	private WAL_ENABLED = true;
 
 	private sst_files: SSTMetadata[] = [];
 	private mem_table = new Map<string, string>();
 
-	constructor(config?: { dataDir?: string }) {
+	constructor(config?: {
+		dataDir?: string;
+		walEnabled?: boolean;
+		memtableLimit?: number;
+		compactionThreshold?: number;
+	}) {
 		if (config?.dataDir) {
 			this.DATA_DIR = config.dataDir;
+		}
+		if (config?.walEnabled !== undefined) {
+			this.WAL_ENABLED = config.walEnabled;
+		}
+		if (config?.memtableLimit !== undefined) {
+			this.MEMTABLE_LIMIT = config.memtableLimit;
+		}
+		if (config?.compactionThreshold !== undefined) {
+			this.COMPACTION_THRESHOLD = config.compactionThreshold;
 		}
 	}
 
@@ -60,6 +79,32 @@ export class StrataKV {
 					return { ...meta, filename };
 				})
 			);
+
+			if (this.WAL_ENABLED) {
+				const wal_path = path.join(this.DATA_DIR, this.WAL_FILE);
+				const wal_exists = await this._file_exists(wal_path);
+				if (wal_exists) {
+					const fileStream = createReadStream(wal_path, {
+						encoding: this.ENCODING,
+					});
+
+					const rl = createInterface({
+						input: fileStream,
+						crlfDelay: Infinity,
+					});
+
+					for await (const line of rl) {
+						// Use indexOf to safely handle values containing colons
+						const separatorIndex = line.indexOf(":");
+						if (separatorIndex === -1) continue;
+
+						const line_key = line.substring(0, separatorIndex);
+						const line_value = line.substring(separatorIndex + 1);
+
+						this.mem_table.set(line_key, line_value);
+					}
+				}
+			}
 		} catch (error) {
 			console.error("Initialization error:", error);
 		}
@@ -101,6 +146,12 @@ export class StrataKV {
 	 * Inserts or updates a key-value pair.
 	 */
 	public database_set = async (key: string, value: string) => {
+		if (this.WAL_ENABLED) {
+			await appendFile(
+				path.join(this.DATA_DIR, this.WAL_FILE),
+				`${key}:${value}\n`
+			);
+		}
 		this.mem_table.set(key, value);
 		if (this.mem_table.size >= this.MEMTABLE_LIMIT)
 			await this.flush_mem_table();
@@ -110,6 +161,12 @@ export class StrataKV {
 	 * Deletes a key by writing a tombstone record.
 	 */
 	public database_delete = async (key: string) => {
+		if (this.WAL_ENABLED) {
+			await appendFile(
+				path.join(this.DATA_DIR, this.WAL_FILE),
+				`${key}:${this.DB_SENTINEL_VALUE}\n`
+			);
+		}
 		this.mem_table.set(key, this.DB_SENTINEL_VALUE);
 		if (this.mem_table.size >= this.MEMTABLE_LIMIT)
 			await this.flush_mem_table();
@@ -169,6 +226,10 @@ export class StrataKV {
 				await this.compaction();
 			}
 			this.mem_table.clear();
+			
+			if (this.WAL_ENABLED) {
+				await writeFile(path.join(this.DATA_DIR, this.WAL_FILE), "");
+			}
 		}
 	};
 
@@ -342,6 +403,14 @@ export class StrataKV {
 					file.filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT)
 				)
 			);
+		}
+	};
+	private _file_exists = async (path: string) => {
+		try {
+			await access(path, constants.F_OK);
+			return true;
+		} catch {
+			return false;
 		}
 	};
 	public _reset_db_state = () => {
