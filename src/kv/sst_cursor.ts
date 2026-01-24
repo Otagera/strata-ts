@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { createInterface, Interface } from "readline/promises";
+import { createInterface, type Interface } from "node:readline/promises";
 
 export class SSTCursor {
 	private rl: Interface;
@@ -43,7 +43,7 @@ export class SSTCursor {
 			const key = result.value.substring(0, separatorIndex);
 			const value = result.value.substring(separatorIndex + 1);
 			this.current = { key, value };
-		} catch (e) {
+		} catch (_e) {
 			// Skip malformed lines
 			await this.advance();
 		}

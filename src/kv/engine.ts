@@ -1,21 +1,20 @@
 import { createReadStream } from "node:fs";
-import type { FileHandle } from "node:fs/promises";
 import {
+	access,
 	appendFile,
-	stat,
+	constants,
 	mkdir,
 	readdir,
 	readFile,
-	unlink,
 	rename,
+	stat,
+	unlink,
+	writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { createInterface } from "readline/promises";
-import { BloomFilter } from "./bloom_filter";
+import { createInterface } from "node:readline/promises";
+import { BloomFilter } from "../shared/bloom_filter";
 import { SSTCursor } from "./sst_cursor";
-import { writeFile } from "node:fs/promises";
-import { access } from "node:fs/promises";
-import { constants } from "node:fs/promises";
 
 // --- Interfaces ---
 interface SSTMetadata {
@@ -70,14 +69,14 @@ export class StrataKV {
 
 			const sorted_files = await this.readDirSortedByTime(
 				this.DATA_DIR,
-				files.filter((file) => file.endsWith(this.SST_FILE_EXT))
+				files.filter((file) => file.endsWith(this.SST_FILE_EXT)),
 			);
 
 			this.sst_files = await Promise.all(
 				sorted_files.map(async (filename) => {
 					const meta = await this.get_file_meta(filename);
 					return { ...meta, filename };
-				})
+				}),
 			);
 
 			if (this.WAL_ENABLED) {
@@ -149,7 +148,7 @@ export class StrataKV {
 		if (this.WAL_ENABLED) {
 			await appendFile(
 				path.join(this.DATA_DIR, this.WAL_FILE),
-				`${key}:${value}\n`
+				`${key}:${value}\n`,
 			);
 		}
 		this.mem_table.set(key, value);
@@ -164,7 +163,7 @@ export class StrataKV {
 		if (this.WAL_ENABLED) {
 			await appendFile(
 				path.join(this.DATA_DIR, this.WAL_FILE),
-				`${key}:${this.DB_SENTINEL_VALUE}\n`
+				`${key}:${this.DB_SENTINEL_VALUE}\n`,
 			);
 		}
 		this.mem_table.set(key, this.DB_SENTINEL_VALUE);
@@ -214,7 +213,7 @@ export class StrataKV {
 					minKey,
 					maxKey,
 					filterData: filter.serialize(),
-				})
+				}),
 			);
 			this.sst_files.unshift({
 				filename,
@@ -226,7 +225,7 @@ export class StrataKV {
 				await this.compaction();
 			}
 			this.mem_table.clear();
-			
+
 			if (this.WAL_ENABLED) {
 				await writeFile(path.join(this.DATA_DIR, this.WAL_FILE), "");
 			}
@@ -265,7 +264,7 @@ export class StrataKV {
 	private get_file_meta = async (filename: string) => {
 		const metaPath = path.join(
 			this.DATA_DIR,
-			filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT)
+			filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT),
 		);
 		const file = await readFile(metaPath, { encoding: this.ENCODING });
 		const data = JSON.parse(file);
@@ -283,7 +282,7 @@ export class StrataKV {
 			files.map(async (filename) => {
 				const file_stat = await stat(path.join(dirpath, filename));
 				return { filename, mtime: file_stat.mtime.getTime() };
-			})
+			}),
 		);
 
 		stats.sort((a, b) => b.mtime - a.mtime);
@@ -301,11 +300,11 @@ export class StrataKV {
 			this.sst_files.map(async (file) => {
 				const cursor = new SSTCursor(
 					path.join(this.DATA_DIR, file.filename),
-					file.filename
+					file.filename,
 				);
 				await cursor.init();
 				return cursor;
-			})
+			}),
 		);
 
 		// Prepare output
@@ -368,7 +367,7 @@ export class StrataKV {
 					minKey: minKeyGlobal,
 					maxKey: maxKeyGlobal,
 					filterData: filter.serialize(),
-				})
+				}),
 			);
 
 			await rename(temp_output_path, path.join(this.DATA_DIR, output_filename));
@@ -388,7 +387,7 @@ export class StrataKV {
 			this.sst_files = [];
 			try {
 				await unlink(temp_output_path);
-			} catch (e) {}
+			} catch (_e) {}
 		}
 	};
 
@@ -400,8 +399,8 @@ export class StrataKV {
 			await unlink(
 				path.join(
 					this.DATA_DIR,
-					file.filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT)
-				)
+					file.filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT),
+				),
 			);
 		}
 	};

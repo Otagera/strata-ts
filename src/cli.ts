@@ -1,5 +1,5 @@
-import { createInterface } from "readline/promises";
-import { stdin as input, stdout as output } from "process";
+import { stdin as input, stdout as output } from "node:process";
+import { createInterface } from "node:readline/promises";
 import { StrataKV } from "./index";
 
 const rl = createInterface({ input, output });
@@ -7,7 +7,7 @@ const rl = createInterface({ input, output });
 async function main() {
 	const db = new StrataKV();
 	await db.database_init();
-	
+
 	console.log("Strata DB CLI");
 	console.log("Commands: SET <key> <value>, GET <key>, DELETE <key>, EXIT");
 
@@ -20,7 +20,7 @@ async function main() {
 
 		try {
 			switch (command) {
-				case "SET":
+				case "SET": {
 					if (!key || !value) {
 						console.log("Usage: SET <key> <value>");
 						break;
@@ -28,7 +28,8 @@ async function main() {
 					await db.database_set(key, value);
 					console.log("OK");
 					break;
-				case "GET":
+				}
+				case "GET": {
 					if (!key) {
 						console.log("Usage: GET <key>");
 						break;
@@ -36,7 +37,8 @@ async function main() {
 					const result = await db.database_get(key);
 					console.log(result === null ? "(nil)" : result);
 					break;
-				case "DELETE":
+				}
+				case "DELETE": {
 					if (!key) {
 						console.log("Usage: DELETE <key>");
 						break;
@@ -44,11 +46,13 @@ async function main() {
 					await db.database_delete(key);
 					console.log("OK");
 					break;
-				case "EXIT":
+				}
+				case "EXIT": {
 					await db.database_close();
 					console.log("Bye!");
 					rl.close();
 					return;
+				}
 				default:
 					if (command) {
 						console.log("Unknown command");
