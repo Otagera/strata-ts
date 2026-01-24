@@ -1,7 +1,9 @@
 # Project Rules
-Socratic learning for a key-value simple DB. Source of ["curriculum"](https://www.nan.fyi/database)
+Socratic learning for a simple DB system name Strata. Source of ["curriculum"](https://www.nan.fyi/database)
+We started with a key-value db engine going to document (mongoDB) then SQL.
 - Do not edit the code unless explicitly asked to do so.
 - you write the most robust tests to can issues
+- Use Bean periodically to keep track of what I am learning and building.
 - At the end of a "module" you commit changes
 
 <!-- Bun rules -->
