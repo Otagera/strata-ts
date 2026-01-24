@@ -139,4 +139,72 @@ describe("Strata DB (KV Edition)", () => {
 
     expect(await newDb.database_get("load_999")).toBe("payload_999");
   });
+
+  test("Multi-cycle Compaction & Integrity", async () => {
+    // Round 1: Write initial data & compact
+    for (let i = 0; i < 10; i++) {
+        await db.database_set(`mc_${i}`, `round1_${i}`);
+    }
+    await db.database_close(); // force flush
+    
+    let cycleDb = new StrataKV({ dataDir: TEST_DATA_DIR });
+    await cycleDb.database_init();
+    await cycleDb.compaction();
+    
+    // Verify Round 1
+    expect(await cycleDb.database_get("mc_0")).toBe("round1_0");
+    
+    // Round 2: Update some, add new, delete some
+    await cycleDb.database_set("mc_0", "round2_updated_0"); // Update
+    await cycleDb.database_set("mc_new_1", "round2_new_1"); // New
+    await cycleDb.database_delete("mc_1"); // Delete
+    
+    // Force multiple SSTs creation by restarting or writing enough
+    // We'll close and reopen to force flush memtable to SST
+    await cycleDb.database_close();
+    
+    cycleDb = new StrataKV({ dataDir: TEST_DATA_DIR });
+    await cycleDb.database_init();
+    await cycleDb.compaction();
+    
+    // Verify Round 2
+    expect(await cycleDb.database_get("mc_0")).toBe("round2_updated_0");
+    expect(await cycleDb.database_get("mc_1")).toBe(null); // Deleted
+    expect(await cycleDb.database_get("mc_new_1")).toBe("round2_new_1");
+    expect(await cycleDb.database_get("mc_5")).toBe("round1_5"); // Untouched
+
+    // Round 3: More compaction on top
+     await cycleDb.database_set("mc_5", "round3_updated_5");
+     await cycleDb.database_close();
+
+     cycleDb = new StrataKV({ dataDir: TEST_DATA_DIR });
+     await cycleDb.database_init();
+     await cycleDb.compaction();
+
+     expect(await cycleDb.database_get("mc_5")).toBe("round3_updated_5");
+     expect(await cycleDb.database_get("mc_0")).toBe("round2_updated_0");
+  });
+
+  test("Automatic Compaction Trigger", async () => {
+    // defaults: MEMTABLE_LIMIT = 5, COMPACTION_THRESHOLD = 5
+    // 25 keys = 5 flushes. The 5th flush should trigger compaction.
+    
+    for (let i = 0; i < 25; i++) {
+        await db.database_set(`auto_${i}`, `val_${i}`);
+    }
+
+    // Allow async operations to settle if any (though we await database_set)
+    
+    // Check file count in data dir
+    // We expect 1 SST file (result of compaction) + 1 META file
+    // If compaction didn't run, we'd have 5 SST + 5 META = 10 files.
+    
+    const { readdir } = await import("node:fs/promises");
+    const files = await readdir(TEST_DATA_DIR);
+    const sstFiles = files.filter(f => f.endsWith(".sst"));
+    
+    expect(sstFiles.length).toBe(1);
+    expect(await db.database_get("auto_0")).toBe("val_0");
+    expect(await db.database_get("auto_24")).toBe("val_24");
+  });
 });

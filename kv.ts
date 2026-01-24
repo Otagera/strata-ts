@@ -30,6 +30,7 @@ export class StrataKV {
 	private ENCODING: BufferEncoding = "utf8";
 	private DB_SENTINEL_VALUE = "$nullified";
 	private MEMTABLE_LIMIT = 5;
+	private COMPACTION_THRESHOLD = 5;
 
 	private sst_files: SSTMetadata[] = [];
 	private mem_table = new Map<string, string>();
@@ -164,6 +165,9 @@ export class StrataKV {
 				maxKey,
 				filter,
 			});
+			if (this.sst_files.length >= this.COMPACTION_THRESHOLD) {
+				await this.compaction();
+			}
 			this.mem_table.clear();
 		}
 	};
@@ -257,43 +261,32 @@ export class StrataKV {
 
 		// 2. K-Way Merge Loop
 		while (sst_cursors.some((c) => !c.done)) {
-			// Find the smallest key among all cursors
 			let minKey: string | null = null;
-			for (const cursor of sst_cursors) {
-				if (!cursor.done) {
-					if (minKey === null || (cursor.key! < minKey)) {
-						minKey = cursor.key;
-					}
-				}
-			}
-
-			if (minKey === null) break; // Should not happen if check above is correct
-
-			// Find the "winner" for this key (the newest file)
-			// sst_files (and thus sst_cursors) are sorted Newest -> Oldest.
-			// So the first cursor that matches minKey is the winner.
 			let winnerCursor: SSTCursor | null = null;
-			
-			// We also need to identify ALL cursors that have this key to advance them later
 			const cursorsWithMinKey: SSTCursor[] = [];
 
 			for (const cursor of sst_cursors) {
-				if (!cursor.done && cursor.key === minKey) {
-					cursorsWithMinKey.push(cursor);
-					if (!winnerCursor) {
-						winnerCursor = cursor; // First match is newest
+				if (!cursor.done) {
+					if (minKey === null || cursor.key! < minKey) {
+						minKey = cursor.key;
+						winnerCursor = cursor;
+						cursorsWithMinKey.length = 0;
+						cursorsWithMinKey.push(cursor);
+					} else if (cursor.key === minKey) {
+						cursorsWithMinKey.push(cursor);
 					}
 				}
 			}
 
+			if (minKey === null) break;
+
 			if (winnerCursor) {
 				const value = winnerCursor.value;
-				
-				// Write to output if it's not a tombstone
+
 				if (value !== this.DB_SENTINEL_VALUE) {
 					const line = `${minKey}:${value}\n`;
 					await appendFile(temp_output_path, line);
-					
+
 					filter.add(minKey!);
 					if (minKeyGlobal === null) minKeyGlobal = minKey;
 					maxKeyGlobal = minKey;
@@ -301,7 +294,6 @@ export class StrataKV {
 				}
 			}
 
-			// Advance ALL cursors that had the minKey
 			for (const cursor of cursorsWithMinKey) {
 				await cursor.advance();
 			}
@@ -309,7 +301,6 @@ export class StrataKV {
 
 		// 3. Finalize
 		if (hasData) {
-			// Write metadata
 			await appendFile(
 				path.join(this.DATA_DIR, output_meta_filename),
 				JSON.stringify({
@@ -319,39 +310,40 @@ export class StrataKV {
 				})
 			);
 
-			// Rename temp file to final SST
 			await rename(temp_output_path, path.join(this.DATA_DIR, output_filename));
 
-			// Delete OLD files
-			for (const file of this.sst_files) {
-				await unlink(path.join(this.DATA_DIR, file.filename));
-				await unlink(path.join(this.DATA_DIR, file.filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT)));
-			}
+			await this._delete_all_sst_file();
 
-			// Update in-memory state
-			this.sst_files = [{
-				filename: output_filename,
-				minKey: minKeyGlobal!,
-				maxKey: maxKeyGlobal!,
-				filter: filter
-			}];
+			this.sst_files = [
+				{
+					filename: output_filename,
+					minKey: minKeyGlobal!,
+					maxKey: maxKeyGlobal!,
+					filter: filter,
+				},
+			];
 		} else {
-			// If everything was tombstones and got deleted, we might end up with empty DB.
-			// Just delete old files.
-			for (const file of this.sst_files) {
-				await unlink(path.join(this.DATA_DIR, file.filename));
-				await unlink(path.join(this.DATA_DIR, file.filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT)));
-			}
+			await this._delete_all_sst_file();
 			this.sst_files = [];
-			// Clean up temp file if it was created (it might be empty)
-			// appendFile creates it even if empty string? No, usually.
-			// Check if exists before deleting? Or just try/catch unlink.
-			try { await unlink(temp_output_path); } catch (e) {}
+			try {
+				await unlink(temp_output_path);
+			} catch (e) {}
 		}
 	};
 
 	// --- Debug & Test Tools ---
 
+	private _delete_all_sst_file = async () => {
+		for (const file of this.sst_files) {
+			await unlink(path.join(this.DATA_DIR, file.filename));
+			await unlink(
+				path.join(
+					this.DATA_DIR,
+					file.filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT)
+				)
+			);
+		}
+	};
 	public _reset_db_state = () => {
 		this.sst_files = [];
 		this.mem_table.clear();

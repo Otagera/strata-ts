@@ -5,6 +5,11 @@
     "@types/node": "^25.0.9"
   },
   "name": "strata",
+  "scripts": {
+    "test": "bun test",
+    "start": "bun run cli.ts",
+    "check": "biome check ."
+  },
   "module": "index.ts",
   "type": "module",
   "private": true,
