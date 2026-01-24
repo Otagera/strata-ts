@@ -15,6 +15,9 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { BloomFilter } from "../shared/bloom_filter";
 import { SSTCursor } from "./sst_cursor";
+import { MemTableCursor } from "./mem_table_cursor";
+import { KWayMergeIterator } from "./merge_iterator";
+import type { BlockIndex } from "../shared/interfaces";
 
 // --- Interfaces ---
 interface SSTMetadata {
@@ -69,14 +72,14 @@ export class StrataKV {
 
 			const sorted_files = await this.readDirSortedByTime(
 				this.DATA_DIR,
-				files.filter((file) => file.endsWith(this.SST_FILE_EXT)),
+				files.filter((file) => file.endsWith(this.SST_FILE_EXT))
 			);
 
 			this.sst_files = await Promise.all(
 				sorted_files.map(async (filename) => {
 					const meta = await this.get_file_meta(filename);
 					return { ...meta, filename };
-				}),
+				})
 			);
 
 			if (this.WAL_ENABLED) {
@@ -128,7 +131,16 @@ export class StrataKV {
 				if (key >= sst.minKey && key <= sst.maxKey) {
 					// Bloom Filter Check
 					if (sst.filter.contains(key)) {
-						found_value = await this.search_sst_file(sst.filename, key);
+						const cursor = new SSTCursor(
+							path.join(this.DATA_DIR, sst.filename),
+							sst.filename
+						);
+						await cursor.seek(key);
+
+						if (cursor.key === key) {
+							found_value = cursor.value;
+						}
+
 						if (found_value !== null) break;
 					}
 				}
@@ -148,7 +160,7 @@ export class StrataKV {
 		if (this.WAL_ENABLED) {
 			await appendFile(
 				path.join(this.DATA_DIR, this.WAL_FILE),
-				`${key}:${value}\n`,
+				`${key}:${value}\n`
 			);
 		}
 		this.mem_table.set(key, value);
@@ -163,7 +175,7 @@ export class StrataKV {
 		if (this.WAL_ENABLED) {
 			await appendFile(
 				path.join(this.DATA_DIR, this.WAL_FILE),
-				`${key}:${this.DB_SENTINEL_VALUE}\n`,
+				`${key}:${this.DB_SENTINEL_VALUE}\n`
 			);
 		}
 		this.mem_table.set(key, this.DB_SENTINEL_VALUE);
@@ -190,11 +202,20 @@ export class StrataKV {
 		const filter = new BloomFilter(128, 3);
 		const sorted_keys = [...this.mem_table.keys()].sort();
 		let big_str = "";
+		const block_index: BlockIndex[] = [];
 
 		for (const key of sorted_keys) {
 			filter.add(key);
 			const value = this.mem_table.get(key);
+			const length_so_far = Buffer.byteLength(big_str, this.ENCODING);
 			big_str += `${key}:${value}\n`;
+			if (
+				block_index.length === 0 ||
+				length_so_far >=
+					Number(block_index[block_index.length - 1]?.offset) + 1024
+			) {
+				block_index.push({ key, offset: length_so_far });
+			}
 		}
 
 		if (big_str && sorted_keys.length > 0) {
@@ -213,7 +234,8 @@ export class StrataKV {
 					minKey,
 					maxKey,
 					filterData: filter.serialize(),
-				}),
+					blockIndex: block_index,
+				})
 			);
 			this.sst_files.unshift({
 				filename,
@@ -264,7 +286,7 @@ export class StrataKV {
 	private get_file_meta = async (filename: string) => {
 		const metaPath = path.join(
 			this.DATA_DIR,
-			filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT),
+			filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT)
 		);
 		const file = await readFile(metaPath, { encoding: this.ENCODING });
 		const data = JSON.parse(file);
@@ -282,32 +304,27 @@ export class StrataKV {
 			files.map(async (filename) => {
 				const file_stat = await stat(path.join(dirpath, filename));
 				return { filename, mtime: file_stat.mtime.getTime() };
-			}),
+			})
 		);
 
 		stats.sort((a, b) => b.mtime - a.mtime);
 		return stats.map((stat) => stat.filename);
 	};
 
-	/**
-	 * Merges all SSTables into a single new SSTable, removing tombstones and duplicates.
-	 */
 	public compaction = async () => {
 		if (this.sst_files.length === 0) return;
 
-		// 1. Initialize cursors for all files
 		const sst_cursors = await Promise.all(
 			this.sst_files.map(async (file) => {
 				const cursor = new SSTCursor(
 					path.join(this.DATA_DIR, file.filename),
-					file.filename,
+					file.filename
 				);
 				await cursor.init();
 				return cursor;
-			}),
+			})
 		);
 
-		// Prepare output
 		const timestamp = Date.now();
 		const uniqueId = Math.random().toString(36).substring(2, 7);
 		const output_filename = `sst_${timestamp}_${uniqueId}${this.SST_FILE_EXT}`;
@@ -318,48 +335,36 @@ export class StrataKV {
 		let minKeyGlobal: string | null = null;
 		let maxKeyGlobal: string | null = null;
 		let hasData = false;
+		let current_offset = 0;
 
-		// 2. K-Way Merge Loop
-		while (sst_cursors.some((c) => !c.done)) {
-			let minKey: string | null = null;
-			let winnerCursor: SSTCursor | null = null;
-			const cursorsWithMinKey: SSTCursor[] = [];
+		const block_index: BlockIndex[] = [];
 
-			for (const cursor of sst_cursors) {
-				if (!cursor.done) {
-					if (minKey === null || cursor.key! < minKey) {
-						minKey = cursor.key;
-						winnerCursor = cursor;
-						cursorsWithMinKey.length = 0;
-						cursorsWithMinKey.push(cursor);
-					} else if (cursor.key === minKey) {
-						cursorsWithMinKey.push(cursor);
-					}
-				}
+		const merger = new KWayMergeIterator(sst_cursors, this.DB_SENTINEL_VALUE);
+
+		while (true) {
+			const result = await merger.next();
+			if (!result) break;
+			const { key, value } = result;
+
+			const line = `${key}:${value}\n`;
+			const line_length = Buffer.byteLength(line, this.ENCODING);
+			if (
+				block_index.length === 0 ||
+				current_offset >=
+					Number(block_index[block_index.length - 1]?.offset) + 1024
+			) {
+				block_index.push({ key, offset: current_offset });
 			}
 
-			if (minKey === null) break;
+			await appendFile(temp_output_path, line);
+			current_offset += line_length;
 
-			if (winnerCursor) {
-				const value = winnerCursor.value;
-
-				if (value !== this.DB_SENTINEL_VALUE) {
-					const line = `${minKey}:${value}\n`;
-					await appendFile(temp_output_path, line);
-
-					filter.add(minKey!);
-					if (minKeyGlobal === null) minKeyGlobal = minKey;
-					maxKeyGlobal = minKey;
-					hasData = true;
-				}
-			}
-
-			for (const cursor of cursorsWithMinKey) {
-				await cursor.advance();
-			}
+			filter.add(key);
+			if (minKeyGlobal === null) minKeyGlobal = key;
+			maxKeyGlobal = key;
+			hasData = true;
 		}
 
-		// 3. Finalize
 		if (hasData) {
 			await appendFile(
 				path.join(this.DATA_DIR, output_meta_filename),
@@ -367,7 +372,8 @@ export class StrataKV {
 					minKey: minKeyGlobal,
 					maxKey: maxKeyGlobal,
 					filterData: filter.serialize(),
-				}),
+					blockIndex: block_index,
+				})
 			);
 
 			await rename(temp_output_path, path.join(this.DATA_DIR, output_filename));
@@ -391,6 +397,50 @@ export class StrataKV {
 		}
 	};
 
+	public async *scan(prefix?: string) {
+		const mem_table_cursor = new MemTableCursor(this.mem_table);
+		await mem_table_cursor.init();
+
+		const sst_cursors_promises = this.sst_files.map(async (file) => {
+			const { filename, maxKey } = file;
+			if (!prefix || maxKey >= prefix) {
+				const cursor = new SSTCursor(
+					path.join(this.DATA_DIR, filename),
+					filename
+				);
+				if (prefix) {
+					await cursor.seek(prefix);
+				} else {
+					await cursor.init();
+				}
+				return cursor;
+			}
+			return undefined;
+		});
+
+		const sst_cursors = await Promise.all(sst_cursors_promises);
+		const valid_sst_cursors = sst_cursors.filter(
+			(cursor): cursor is SSTCursor => cursor !== undefined
+		);
+		const cursors = [mem_table_cursor, ...valid_sst_cursors];
+		const merger = new KWayMergeIterator(cursors, this.DB_SENTINEL_VALUE);
+
+		while (true) {
+			const result = await merger.next();
+			if (!result) break;
+
+			if (prefix && !result.key.startsWith(prefix)) {
+				if (result.key > prefix) {
+					break;
+				} else {
+					continue;
+				}
+			}
+
+			yield result;
+		}
+	}
+
 	// --- Debug & Test Tools ---
 
 	private _delete_all_sst_file = async () => {
@@ -399,8 +449,8 @@ export class StrataKV {
 			await unlink(
 				path.join(
 					this.DATA_DIR,
-					file.filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT),
-				),
+					file.filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT)
+				)
 			);
 		}
 	};
