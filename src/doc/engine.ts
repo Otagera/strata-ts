@@ -4,16 +4,20 @@ import type { StrataDocFindOptions } from "../shared/interfaces";
 import { StrataId } from "./id";
 
 export class StrataDoc {
-	private kv = new StrataKV();
+	private kv: StrataKV;
 	private indexes: Map<string, Set<string>> = new Map();
 
-	constructor(config?: { dataDir?: string }) {
-		if (config) {
-			this.kv = new StrataKV(config);
+	constructor(configOrKV?: { dataDir?: string } | StrataKV) {
+		if (configOrKV instanceof StrataKV) {
+			this.kv = configOrKV;
+		} else {
+			this.kv = new StrataKV(configOrKV);
 		}
 	}
 
 	init = async () => {
+		// If we own the KV (config passed), we init it.
+		// If KV was injected, we assume caller handles init, or we do it safely (idempotent).
 		await this.kv.database_init();
 	};
 	private _makeKey = (collection: string, id: string) => {
@@ -53,7 +57,7 @@ export class StrataDoc {
 		const _id = (doc._id || StrataId.generate()) as string;
 		const key = this._makeKey(collection, _id);
 
-		const docWithId = { ...doc, _id };
+		const docWithId: Record<string, any> = { ...doc, _id };
 		const value = JSON.stringify(docWithId);
 
 		await this.kv.database_set(key, value);

@@ -35,6 +35,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # database files
 data/
+data_demo/
 test_data/
 data_doc_test/
 the_humble_file.txt
