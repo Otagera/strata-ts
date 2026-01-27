@@ -1,0 +1,5 @@
+IDX%3A%3Ausers%3A%3Arank%3A%3A1%3A%3A69788ced434fd6fc85108f22:
+IDX%3A%3Ausers%3A%3Arank%3A%3A2%3A%3A69788ced092e7c16d4108f23:
+users%3A%3A69788ced092e7c16d4108f23:{"name":"Bob","rank":2,"_id":"69788ced092e7c16d4108f23"}
+users%3A%3A69788ced434fd6fc85108f22:{"name":"Alice","rank":1,"_id":"69788ced434fd6fc85108f22"}
+users%3A%3A69788ced90408e04e5108f24:{"name":"Charlie","rank":2,"_id":"69788ced90408e04e5108f24"}

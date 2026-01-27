@@ -14,8 +14,8 @@ import {
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { BloomFilter } from "../shared/bloom_filter";
-import { SSTCursor } from "./sst_cursor";
-import { MemTableCursor } from "./mem_table_cursor";
+import { SSTIterator } from "./sst_iterator";
+import { MemTableIterator } from "./mem_table_iterator";
 import { KWayMergeIterator } from "./merge_iterator";
 import type { BlockIndex } from "../shared/interfaces";
 
@@ -131,7 +131,7 @@ export class StrataKV {
 				if (key >= sst.minKey && key <= sst.maxKey) {
 					// Bloom Filter Check
 					if (sst.filter.contains(key)) {
-						const cursor = new SSTCursor(
+						const cursor = new SSTIterator(
 							path.join(this.DATA_DIR, sst.filename),
 							sst.filename
 						);
@@ -316,7 +316,7 @@ export class StrataKV {
 
 		const sst_cursors = await Promise.all(
 			this.sst_files.map(async (file) => {
-				const cursor = new SSTCursor(
+				const cursor = new SSTIterator(
 					path.join(this.DATA_DIR, file.filename),
 					file.filename
 				);
@@ -398,13 +398,16 @@ export class StrataKV {
 	};
 
 	public async *scan(prefix?: string) {
-		const mem_table_cursor = new MemTableCursor(this.mem_table);
+		const mem_table_cursor = new MemTableIterator(this.mem_table);
 		await mem_table_cursor.init();
+		if (prefix) {
+			await mem_table_cursor.seek(prefix);
+		}
 
 		const sst_cursors_promises = this.sst_files.map(async (file) => {
 			const { filename, maxKey } = file;
 			if (!prefix || maxKey >= prefix) {
-				const cursor = new SSTCursor(
+				const cursor = new SSTIterator(
 					path.join(this.DATA_DIR, filename),
 					filename
 				);
@@ -420,7 +423,7 @@ export class StrataKV {
 
 		const sst_cursors = await Promise.all(sst_cursors_promises);
 		const valid_sst_cursors = sst_cursors.filter(
-			(cursor): cursor is SSTCursor => cursor !== undefined
+			(cursor): cursor is SSTIterator => cursor !== undefined
 		);
 		const cursors = [mem_table_cursor, ...valid_sst_cursors];
 		const merger = new KWayMergeIterator(cursors, this.DB_SENTINEL_VALUE);
@@ -429,15 +432,18 @@ export class StrataKV {
 			const result = await merger.next();
 			if (!result) break;
 
-			if (prefix && !result.key.startsWith(prefix)) {
-				if (result.key > prefix) {
+			if (prefix) {
+				if (result.key.startsWith(prefix)) {
+					yield result;
+				} else if (result.key > prefix) {
+					// Since sources are sorted, if we hit a key > prefix that doesn't start with it,
+					// we are out of the range.
 					break;
-				} else {
-					continue;
 				}
+				// If key < prefix, we just continue (though seek should have prevented this)
+			} else {
+				yield result;
 			}
-
-			yield result;
 		}
 	}
 

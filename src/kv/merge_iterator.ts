@@ -1,10 +1,10 @@
-import type { ICursor, Pair } from "../shared/interfaces";
+import type { IKVIterator, Pair } from "../shared/interfaces";
 
 export class KWayMergeIterator {
-	private cursors: ICursor[];
+	private cursors: IKVIterator[];
 	private DB_SENTINEL_VALUE = "$nullified";
 
-	constructor(cursors: ICursor[], db_sentinel_value?: string) {
+	constructor(cursors: IKVIterator[], db_sentinel_value?: string) {
 		this.cursors = cursors;
 		if (db_sentinel_value) {
 			this.DB_SENTINEL_VALUE = db_sentinel_value;
@@ -18,7 +18,7 @@ export class KWayMergeIterator {
 
 		while (this.cursors.some((c) => !c.done)) {
 			let minKey: string | null = null;
-			const cursorsWithMinKey: ICursor[] = [];
+			const cursorsWithMinKey: IKVIterator[] = [];
 
 			for (const cursor of this.cursors) {
 				if (!cursor.done) {
@@ -44,7 +44,7 @@ export class KWayMergeIterator {
 				await cursor.advance();
 			}
 
-			if (value && value !== this.DB_SENTINEL_VALUE) {
+			if (value !== undefined && value !== this.DB_SENTINEL_VALUE) {
 				return { key, value };
 			}
 		}

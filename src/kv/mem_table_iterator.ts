@@ -1,23 +1,17 @@
-import type { ICursor, Pair } from "../shared/interfaces";
+import type { IKVIterator, Pair } from "../shared/interfaces";
 
-export class MemTableCursor implements ICursor {
+export class MemTableIterator implements IKVIterator {
 	private mem_table: Map<string, string>;
 	private current: Pair | null = null;
-	private keys_list: string[];
+	private keys_list: string[] = [];
 	private internal_pointer: number = -1;
 
 	constructor(mem_table: Map<string, string>) {
 		this.mem_table = mem_table;
-		this.keys_list = [];
 	}
 
 	async init() {
-		const keys = this.mem_table.keys();
-		for (const key of keys) {
-			this.keys_list.push(key);
-		}
-		this.keys_list.sort();
-
+		this.keys_list = [...this.mem_table.keys()].sort();
 		this.internal_pointer = -1;
 		await this.advance();
 	}
@@ -25,16 +19,20 @@ export class MemTableCursor implements ICursor {
 	async advance() {
 		this.internal_pointer += 1;
 
-		if (this.keys_list.length <= this.internal_pointer) {
+		if (this.internal_pointer >= this.keys_list.length) {
 			this.current = null;
 			return;
 		}
 
 		const key = this.keys_list[this.internal_pointer];
-		if (!key) throw new Error();
-		const value = this.mem_table.get(key);
-		if (!value) throw new Error();
-		this.current = { key, value };
+		const value = this.mem_table.get(key!);
+		this.current = { key: key!, value: value! };
+	}
+
+	async seek(targetKey: string) {
+		// Binary search would be better, but linear is fine for MemTable size
+		this.internal_pointer = this.keys_list.findIndex((k) => k >= targetKey) - 1;
+		await this.advance();
 	}
 
 	get key(): string | null {

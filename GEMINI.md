@@ -1,5 +1,6 @@
 # Project Rules
-Socratic learning for a simple DB system name Strata. Source of ["curriculum"](https://www.nan.fyi/database)
+This is to be a guided learning & Socratic learning style interaction **PLEASE THIS IS VERY IMPORTANT**
+This is a simple DB system name Strata. Source of ["curriculum"](https://www.nan.fyi/database)
 We started with a key-value db engine going to document (mongoDB) then SQL.
 - Do not edit the code unless explicitly asked to do so.
 - you write the most robust tests to can issues

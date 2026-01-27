@@ -1,11 +1,11 @@
 import { createReadStream } from "node:fs";
 import { createInterface, type Interface } from "node:readline/promises";
-import type { BlockIndex, ICursor, Pair } from "../shared/interfaces";
+import type { BlockIndex, IKVIterator, Pair } from "../shared/interfaces";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { BloomFilter } from "../shared/bloom_filter";
 
-export class SSTCursor implements ICursor {
+export class SSTIterator implements IKVIterator {
 	private rl: Interface;
 	private current: Pair | null = null;
 	private iterator: AsyncIterableIterator<string>;
