@@ -103,13 +103,24 @@ The Document engine adds structure and querying capabilities on top of KV.
 
 ---
 
-## 🔮 Roadmap
+## 🔮 Roadmap: Module 3 (Strata SQL)
 
-### Module 3: Strata SQL
-*   **Lexer & Parser:** Convert SQL strings into an Abstract Syntax Tree (AST).
-*   **Query Planner:** Optimize execution (e.g., use `IndexQueryCursor` vs `QueryCursor`).
-*   **Executor:** Run the plan against `StrataDoc` or `StrataKV`.
+We are building a Relational Database Engine from scratch. This will be tackled in two major phases:
+
+### Phase 1: The Relational Engine (Structure)
+Goal: Support structured data, schemas, and SQL querying.
+*   **Lexer & Parser:** Convert raw SQL strings (`SELECT * FROM users`) into an Abstract Syntax Tree (AST).
+*   **System Catalog:** Store metadata about tables, columns, and types (`CREATE TABLE`).
+*   **Execution Engine:**
+    *   **INSERT:** Enforce schema types (e.g., ensure `age` is an Integer) and store rows.
+    *   **SELECT:** Implement `Project` (picking columns), `Filter` (WHERE clause), and `Scan` operators.
+*   **Query Planner:** Basic optimization of the execution tree.
+
+### Phase 2: The Transaction Manager (Safety)
+Goal: Add ACID properties (Atomicity, Consistency, Isolation, Durability).
+*   **Atomicity:** Implement `BEGIN`, `COMMIT`, `ROLLBACK`. If a transaction fails, no changes persist.
+*   **Isolation:** Implement **MVCC (Multi-Version Concurrency Control)**. Readers shouldn't block writers.
+*   **Durability:** Leverage the existing WAL to ensure committed transactions survive crashes.
 
 ### Future
 *   **Dashboard:** A web UI to visualize SSTables, compaction, and query performance.
-*   **Transactions:** Implementing ACID properties.
