@@ -102,6 +102,13 @@ describe("Strata SQL Engine", () => {
 				sql.execute("INSERT INTO users (id) VALUES (1, 2)")
 			).rejects.toThrow("Column count (1) does not match value count (2)");
 		});
+
+		test("fails when inserting extra column not in schema", async () => {
+			// 'hobby' is not in schema
+			expect(
+				sql.execute("INSERT INTO users (id, name, active, hobby) VALUES (1, 'Neo', true, 'hacking')")
+			).rejects.toThrow("Column 'hobby' does not exist in table 'users'");
+		});
 	});
 
 	describe("SELECT", () => {

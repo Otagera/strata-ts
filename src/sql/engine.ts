@@ -78,6 +78,16 @@ export class StrataSQL {
 			throw new Error(`Table '${collection}' does not exist`);
 		}
 
+		// Check for extra columns
+		const validColumns = new Set(schema.columns.map((c) => c.name));
+		for (const key of Object.keys(ast.values)) {
+			if (!validColumns.has(key)) {
+				throw new Error(
+					`Column '${key}' does not exist in table '${collection}'`
+				);
+			}
+		}
+
 		for (const column of schema.columns) {
 			const key = column.name;
 			const value = ast.values[key];
