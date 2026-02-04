@@ -106,3 +106,8 @@ export interface CreateTableStatement extends ASTNode {
 	table: string;
 	columns: ColumnDefinition[];
 }
+
+export interface TableSchema {
+	name: string;
+	columns: ColumnDefinition[];
+}

@@ -20,6 +20,8 @@ export class Lexer {
 		"INT",
 		"BOOL",
 		"TEXT",
+		"TRUE",
+		"FALSE",
 	]);
 
 	constructor(source: string) {
