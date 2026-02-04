@@ -17,7 +17,8 @@ import { BloomFilter } from "../shared/bloom_filter";
 import { SSTIterator } from "./sst_iterator";
 import { MemTableIterator } from "./mem_table_iterator";
 import { KWayMergeIterator } from "./merge_iterator";
-import type { BlockIndex } from "../shared/interfaces";
+import type { BlockIndex, MemTable, WALBatch } from "../shared/interfaces";
+import { WALManager } from "./wal";
 
 // --- Interfaces ---
 interface SSTMetadata {
@@ -38,9 +39,11 @@ export class StrataKV {
 	private MEMTABLE_LIMIT = 5;
 	private COMPACTION_THRESHOLD = 5;
 	private WAL_ENABLED = true;
+	private WRITE_LOCK = false;
 
 	private sst_files: SSTMetadata[] = [];
-	private mem_table = new Map<string, string>();
+	private mem_table: MemTable = new Map();
+	private wal_instance: WALManager;
 
 	constructor(config?: {
 		dataDir?: string;
@@ -54,6 +57,16 @@ export class StrataKV {
 		if (config?.walEnabled !== undefined) {
 			this.WAL_ENABLED = config.walEnabled;
 		}
+
+		if (this.WAL_ENABLED) {
+			this.wal_instance = new WALManager({
+				dataDir: this.DATA_DIR,
+				walFile: this.WAL_FILE,
+				encoding: this.ENCODING,
+				dbSentinelValue: this.DB_SENTINEL_VALUE,
+			});
+		}
+
 		if (config?.memtableLimit !== undefined) {
 			this.MEMTABLE_LIMIT = config.memtableLimit;
 		}
@@ -83,28 +96,9 @@ export class StrataKV {
 			);
 
 			if (this.WAL_ENABLED) {
-				const wal_path = path.join(this.DATA_DIR, this.WAL_FILE);
-				const wal_exists = await this._file_exists(wal_path);
-				if (wal_exists) {
-					const fileStream = createReadStream(wal_path, {
-						encoding: this.ENCODING,
-					});
-
-					const rl = createInterface({
-						input: fileStream,
-						crlfDelay: Infinity,
-					});
-
-					for await (const line of rl) {
-						// Use indexOf to safely handle values containing colons
-						const separatorIndex = line.indexOf(":");
-						if (separatorIndex === -1) continue;
-
-						const line_key = line.substring(0, separatorIndex);
-						const line_value = line.substring(separatorIndex + 1);
-
-						this.mem_table.set(line_key, line_value);
-					}
+				const table = await this.wal_instance.recover();
+				if (table) {
+					this.mem_table = table;
 				}
 			}
 		} catch (error) {
@@ -158,9 +152,9 @@ export class StrataKV {
 	 */
 	public database_set = async (key: string, value: string) => {
 		if (this.WAL_ENABLED) {
-			await appendFile(
-				path.join(this.DATA_DIR, this.WAL_FILE),
-				`${key}:${value}\n`
+			await this.wal_instance.appendBatch(
+				new Map([[key, value]]),
+				crypto.randomUUID()
 			);
 		}
 		this.mem_table.set(key, value);
@@ -173,9 +167,9 @@ export class StrataKV {
 	 */
 	public database_delete = async (key: string) => {
 		if (this.WAL_ENABLED) {
-			await appendFile(
-				path.join(this.DATA_DIR, this.WAL_FILE),
-				`${key}:${this.DB_SENTINEL_VALUE}\n`
+			await this.wal_instance.appendBatch(
+				new Map([[key, this.DB_SENTINEL_VALUE]]),
+				crypto.randomUUID()
 			);
 		}
 		this.mem_table.set(key, this.DB_SENTINEL_VALUE);
@@ -191,6 +185,26 @@ export class StrataKV {
 			await this.flush_mem_table();
 		}
 		this._reset_db_state();
+	};
+
+	public commitBatch = async (batch: WALBatch) => {
+		this.acquireLock();
+
+		if (this.WAL_ENABLED) {
+			await this.wal_instance.appendBatch(batch, crypto.randomUUID());
+		}
+
+		for (const [key, value] of batch) {
+			if (value === null) {
+				this.mem_table.set(key, this.DB_SENTINEL_VALUE);
+			} else {
+				this.mem_table.set(key, value);
+			}
+		}
+		if (this.mem_table.size >= this.MEMTABLE_LIMIT) {
+			return this.flush_mem_table();
+		}
+		this.releaseLock();
 	};
 
 	// --- Private Helpers ---
@@ -249,7 +263,7 @@ export class StrataKV {
 			this.mem_table.clear();
 
 			if (this.WAL_ENABLED) {
-				await writeFile(path.join(this.DATA_DIR, this.WAL_FILE), "");
+				await this.wal_instance.clear();
 			}
 		}
 	};
@@ -447,6 +461,23 @@ export class StrataKV {
 		}
 	}
 
+	private acquireLock = () => {
+		return new Promise<void>((resolve) => {
+			const tryAcquire = () => {
+				if (!this.WRITE_LOCK) {
+					this.WRITE_LOCK = true;
+					resolve();
+				} else {
+					setImmediate(tryAcquire);
+				}
+			};
+			tryAcquire();
+		});
+	};
+	private releaseLock = () => {
+		this.WRITE_LOCK = false;
+	};
+
 	// --- Debug & Test Tools ---
 
 	private _delete_all_sst_file = async () => {
@@ -460,17 +491,10 @@ export class StrataKV {
 			);
 		}
 	};
-	private _file_exists = async (path: string) => {
-		try {
-			await access(path, constants.F_OK);
-			return true;
-		} catch {
-			return false;
-		}
-	};
 	public _reset_db_state = () => {
 		this.sst_files = [];
 		this.mem_table.clear();
 	};
 	public _get_db_size = () => this.mem_table.size;
+	public _get_db_sentinel_value = () => this.DB_SENTINEL_VALUE;
 }

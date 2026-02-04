@@ -119,8 +119,9 @@ Goal: Support structured data, schemas, and SQL querying.
 ### Phase 2: The Transaction Manager (Safety)
 Goal: Add ACID properties (Atomicity, Consistency, Isolation, Durability).
 *   **Atomicity:** Implement `BEGIN`, `COMMIT`, `ROLLBACK`. If a transaction fails, no changes persist.
-*   **Isolation:** Implement **MVCC (Multi-Version Concurrency Control)**. Readers shouldn't block writers.
-*   **Durability:** Leverage the existing WAL to ensure committed transactions survive crashes.
+*   **Isolation:** Implement **MVCC (Multi-Version Concurrency Control)** using Transaction IDs. Readers see a consistent snapshot and never block writers.
+*   **Durability:** Leverage the WAL with `BEGIN_TX` and `COMMIT_TX` markers to ensure only fully completed batches are recovered.
+*   **Unique IDs:** Utilize `crypto.randomUUID()` for robust transaction identification.
 
 ### Future
 *   **Dashboard:** A web UI to visualize SSTables, compaction, and query performance.

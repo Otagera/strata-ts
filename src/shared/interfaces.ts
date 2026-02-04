@@ -111,3 +111,14 @@ export interface TableSchema {
 	name: string;
 	columns: ColumnDefinition[];
 }
+
+export interface WALConfig {
+	dataDir: string;
+	walFile: string;
+	encoding: BufferEncoding;
+	dbSentinelValue: string;
+}
+
+export type MemTable = Map<string, string>; // In-memory key-value store
+
+export type WALBatch = Map<string, string | null>; // null = tombstone
