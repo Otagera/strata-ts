@@ -1,18 +1,17 @@
-import type { WALBatch } from "../shared/interfaces";
-import type { StrataKV } from "./engine";
+import type { IKVStorageEngine, WALBatch } from "../shared/interfaces";
 
 export class Transaction {
 	private buffer: WALBatch = new Map();
-	private db: StrataKV;
+	private db: IKVStorageEngine;
 
-	constructor(db: StrataKV) {
+	constructor(db: IKVStorageEngine) {
 		this.db = db;
 	}
 
 	public set = (key: string, value: string) => {
 		this.buffer.set(key, value);
 	};
-	public get = (key: string) => {
+	public get = async (key: string) => {
 		if (this.buffer.has(key)) {
 			return this.buffer.get(key);
 		}

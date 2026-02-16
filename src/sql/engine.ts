@@ -1,21 +1,23 @@
-import { StrataDoc } from "../doc/engine";
-import { Lexer } from "./lexer";
-import { Parser } from "./parser";
+import type { StrataDoc } from "../doc/engine";
+import type { Transaction } from "../kv/transaction";
 import {
-	NodeType,
 	type ASTNode,
-	type SelectStatement,
 	type BinaryExpression,
-	type Literal,
-	type Identifier,
 	type CreateTableStatement,
+	type Identifier,
 	type InsertStatement,
+	type Literal,
+	NodeType,
+	type SelectStatement,
 } from "../shared/interfaces";
 import { SystemCatalog } from "./catalog";
+import { Lexer } from "./lexer";
+import { Parser } from "./parser";
 
 export class StrataSQL {
 	private docEngine: StrataDoc;
 	private systemCatalog: SystemCatalog;
+	private currentTx: Transaction | null = null;
 
 	constructor(docEngine: StrataDoc) {
 		this.docEngine = docEngine;
@@ -38,9 +40,40 @@ export class StrataSQL {
 			case NodeType.CreateTableStatement:
 				await this.executeCreateTable(ast as CreateTableStatement);
 				return [];
+			case NodeType.BeginStatement:
+				this.executeBegin();
+				return [];
+			case NodeType.CommitStatement:
+				await this.executeCommit();
+				return [];
+			case NodeType.RollbackStatement:
+				this.executeRollback();
+				return [];
 			default:
 				throw new Error(`Unsupported statement type: ${ast.type}`);
 		}
+	};
+
+	private executeBegin = () => {
+		if (this.currentTx) {
+			throw new Error("Transaction already in progress");
+		}
+		this.currentTx = this.docEngine.engine.beginTransaction();
+	};
+
+	private executeCommit = async () => {
+		if (!this.currentTx) {
+			throw new Error("No transaction in progress");
+		}
+		await this.currentTx.commit();
+		this.currentTx = null;
+	};
+
+	private executeRollback = () => {
+		if (!this.currentTx) {
+			throw new Error("No transaction in progress");
+		}
+		this.currentTx = null; // Just discard the buffer
 	};
 
 	private executeSelect = async (ast: SelectStatement): Promise<any[]> => {
@@ -59,7 +92,7 @@ export class StrataSQL {
 				const columnExists = schema.columns.some((col) => col.name === column);
 				if (!columnExists) {
 					throw new Error(
-						`Column '${column}' does not exist in table '${collection}'`
+						`Column '${column}' does not exist in table '${collection}'`,
 					);
 				}
 			} else {
@@ -67,7 +100,12 @@ export class StrataSQL {
 			}
 		}
 
-		const cursor = this.docEngine.find(collection, query);
+		const cursor = this.docEngine.find(
+			collection,
+			query,
+			{},
+			this.currentTx || undefined,
+		);
 		return await cursor.toArray();
 	};
 
@@ -78,58 +116,64 @@ export class StrataSQL {
 			throw new Error(`Table '${collection}' does not exist`);
 		}
 
-		// Check for extra columns
-		const validColumns = new Set(schema.columns.map((c) => c.name));
-		for (const key of Object.keys(ast.values)) {
-			if (!validColumns.has(key)) {
-				throw new Error(
-					`Column '${key}' does not exist in table '${collection}'`
-				);
-			}
-		}
-
 		for (const column of schema.columns) {
 			const key = column.name;
 			const value = ast.values[key];
 			const exists = value !== undefined;
 			if (!exists) {
 				throw new Error(
-					`Missing value for column '${column.name}' in table '${collection}'`
+					`Missing value for column '${column.name}' in table '${collection}'`,
 				);
 			}
 			switch (column.dataType) {
 				case "INT":
 					if (typeof value !== "number" || !Number.isInteger(value)) {
 						throw new Error(
-							`Invalid type for column '${column.name}': expected INT`
+							`Invalid type for column '${column.name}': expected INT`,
 						);
 					}
 					break;
 				case "TEXT":
 					if (typeof value !== "string") {
 						throw new Error(
-							`Invalid type for column '${column.name}': expected TEXT`
+							`Invalid type for column '${column.name}': expected TEXT`,
 						);
 					}
 					break;
 				case "BOOL":
 					if (typeof value !== "boolean") {
 						throw new Error(
-							`Invalid type for column '${column.name}': expected BOOL`
+							`Invalid type for column '${column.name}': expected BOOL`,
 						);
 					}
 					break;
 				default:
 					throw new Error(
-						`Unsupported data type for column '${column.name}': ${column.dataType}`
+						`Unsupported data type for column '${column.name}': ${column.dataType}`,
 					);
 			}
 		}
-		
-		await this.docEngine.insert(collection, ast.values);
+
+		// Check for extra columns
+		const schemaColumnNames = new Set(schema.columns.map((col) => col.name));
+		for (const key of Object.keys(ast.values)) {
+			if (!schemaColumnNames.has(key)) {
+				throw new Error(
+					`Column '${key}' does not exist in table '${collection}'`,
+				);
+			}
+		}
+
+		await this.docEngine.insert(
+			collection,
+			ast.values,
+			this.currentTx || undefined,
+		);
 	};
 
-	private executeCreateTable = async (ast: CreateTableStatement): Promise<void> => {
+	private executeCreateTable = async (
+		ast: CreateTableStatement,
+	): Promise<void> => {
 		await this.systemCatalog.createTable(ast.table, ast.columns);
 	};
 
@@ -146,11 +190,15 @@ export class StrataSQL {
 			if (expr.operator === "AND") {
 				const left = this.translateWhere(expr.left);
 				const right = this.translateWhere(expr.right);
-				
+
 				// Deep merge for AND logic
 				const merged = { ...left };
 				for (const key in right) {
-					if (merged[key] && typeof merged[key] === "object" && typeof right[key] === "object") {
+					if (
+						merged[key] &&
+						typeof merged[key] === "object" &&
+						typeof right[key] === "object"
+					) {
 						merged[key] = { ...merged[key], ...right[key] };
 					} else {
 						merged[key] = right[key];

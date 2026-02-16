@@ -1,17 +1,17 @@
-import type { Lexer } from "./lexer";
 import {
+	type ASTNode,
+	type BinaryExpression,
+	type ColumnDefinition,
+	type CreateTableStatement,
+	type Identifier,
+	type InsertStatement,
+	type Literal,
+	NodeType,
+	type SelectStatement,
 	type Token,
 	TokenType,
-	NodeType,
-	type ASTNode,
-	type SelectStatement,
-	type CreateTableStatement,
-	type InsertStatement,
-	type BinaryExpression,
-	type Literal,
-	type Identifier,
-	type ColumnDefinition,
 } from "../shared/interfaces";
+import type { Lexer } from "./lexer";
 
 export class Parser {
 	private lexer: Lexer;
@@ -32,6 +32,18 @@ export class Parser {
 		if (this.peek(TokenType.Keyword, "INSERT")) {
 			return this.parseInsert();
 		}
+		if (this.peek(TokenType.Keyword, "BEGIN")) {
+			this.consume(TokenType.Keyword, "Expected BEGIN");
+			return { type: NodeType.BeginStatement };
+		}
+		if (this.peek(TokenType.Keyword, "COMMIT")) {
+			this.consume(TokenType.Keyword, "Expected COMMIT");
+			return { type: NodeType.CommitStatement };
+		}
+		if (this.peek(TokenType.Keyword, "ROLLBACK")) {
+			this.consume(TokenType.Keyword, "Expected ROLLBACK");
+			return { type: NodeType.RollbackStatement };
+		}
 		throw new Error(`Unexpected token: ${this.currentToken.value}`);
 	}
 
@@ -43,7 +55,7 @@ export class Parser {
 		this.consume(TokenType.Keyword, "Expected FROM");
 		const table = this.consume(
 			TokenType.Identifier,
-			"Expected table name"
+			"Expected table name",
 		).value;
 
 		let where: ASTNode | undefined;
@@ -65,7 +77,7 @@ export class Parser {
 		this.consume(TokenType.Keyword, "Expected TABLE");
 		const table = this.consume(
 			TokenType.Identifier,
-			"Expected table name"
+			"Expected table name",
 		).value;
 
 		this.consume(TokenType.Punctuation, "Expected '('");
@@ -74,7 +86,7 @@ export class Parser {
 		while (true) {
 			const name = this.consume(
 				TokenType.Identifier,
-				"Expected column name"
+				"Expected column name",
 			).value;
 			const typeToken = this.consume(TokenType.Keyword, "Expected column type");
 
@@ -107,7 +119,7 @@ export class Parser {
 		this.consume(TokenType.Keyword, "Expected INTO");
 		const table = this.consume(
 			TokenType.Identifier,
-			"Expected table name"
+			"Expected table name",
 		).value;
 
 		// Parse Column Names: (id, name)
@@ -115,7 +127,7 @@ export class Parser {
 		const columns: string[] = [];
 		while (true) {
 			columns.push(
-				this.consume(TokenType.Identifier, "Expected column name").value
+				this.consume(TokenType.Identifier, "Expected column name").value,
 			);
 			if (this.peek(TokenType.Punctuation, ",")) {
 				this.advance();
@@ -148,14 +160,17 @@ export class Parser {
 		// Validation: Count Mismatch
 		if (columns.length !== values.length) {
 			throw new Error(
-				`Column count (${columns.length}) does not match value count (${values.length})`
+				`Column count (${columns.length}) does not match value count (${values.length})`,
 			);
 		}
 
 		// Zip columns and values into a Record
 		const record: Record<string, any> = {};
 		for (let i = 0; i < columns.length; i++) {
-			record[columns[i]] = values[i];
+			const colName = columns[i];
+			if (colName) {
+				record[colName] = values[i];
+			}
 		}
 
 		return {
@@ -175,7 +190,7 @@ export class Parser {
 			while (true) {
 				const colToken = this.consume(
 					TokenType.Identifier,
-					"Expected column name"
+					"Expected column name",
 				);
 				columns.push(colToken.value);
 
@@ -257,7 +272,11 @@ export class Parser {
 			} as Literal;
 		}
 
-		if (this.currentToken.type === TokenType.Keyword && (this.currentToken.value === "TRUE" || this.currentToken.value === "FALSE")) {
+		if (
+			this.currentToken.type === TokenType.Keyword &&
+			(this.currentToken.value === "TRUE" ||
+				this.currentToken.value === "FALSE")
+		) {
 			const value = this.currentToken.value === "TRUE";
 			this.advance();
 			return {
@@ -277,7 +296,7 @@ export class Parser {
 		}
 
 		throw new Error(
-			`Unexpected token in expression: ${this.currentToken.value}`
+			`Unexpected token in expression: ${this.currentToken.value}`,
 		);
 	}
 

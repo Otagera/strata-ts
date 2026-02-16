@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Lexer } from "./lexer";
 import { TokenType } from "../shared/interfaces";
+import { Lexer } from "./lexer";
 
 describe("SQL Lexer", () => {
 	test("Simple SELECT", () => {

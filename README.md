@@ -25,6 +25,33 @@ A relational engine with a SQL parser and query planner.
 *   **Best for:** Structured data, complex joins, transactions (ACID).
 *   **Status:** 🚧 Planned (Module 3).
 
+## 🌐 StrataUI
+
+StrataDB now includes a modern, Spacetime-inspired web interface for exploring and managing your data.
+
+### Running the UI
+To start the StrataUI server:
+```bash
+bun src/server.ts
+```
+The UI will be available at [http://localhost:2345](http://localhost:2345).
+
+### Architecture & Future Iterations
+
+#### SpaceManager (Multi-Tenancy)
+The backend in `src/server.ts` uses a `SpaceManager` class designed for future cloud offering. Currently, it points to the root `data/` directory, but it is "Space-Aware."
+
+**To enable partitioned rooms/spaces later:**
+1. Update `SpaceManager.getSpace(spaceId)` in `src/server.ts`.
+2. Change the `dataDir` logic to:
+   ```typescript
+   const dataDir = path.join("data", "rooms", spaceId);
+   ```
+3. The UI already passes a `spaceId` query parameter, so you can implement a "Room Switcher" in the frontend to isolate data between different users or projects.
+
+#### WebSocket Telemetry
+The UI listens on `/ws` for real-time engine events. You can extend the `broadcast` function in `src/server.ts` to surface more internal engine metrics (like Bloom Filter false positives or Compaction progress).
+
 ---
 
 ## 🏗️ Architecture

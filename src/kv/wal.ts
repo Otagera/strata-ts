@@ -1,11 +1,9 @@
-import { appendFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import { createReadStream } from "node:fs";
+import { appendFile, mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
-
-import { Utils } from "../shared/utils";
 import type { MemTable, WALBatch, WALConfig } from "../shared/interfaces";
-import { writeFile } from "node:fs/promises";
+import { Utils } from "../shared/utils";
 
 export class WALManager {
 	private DATA_DIR = "data";
@@ -102,7 +100,7 @@ export class WALManager {
 							}
 							break;
 
-						case this.END_BATCH_KEY:
+						case this.END_BATCH_KEY: {
 							const changes = pendingTx.get(entry.txId);
 							if (changes) {
 								for (const change of changes) {
@@ -115,6 +113,7 @@ export class WALManager {
 								pendingTx.delete(entry.txId);
 							}
 							break;
+						}
 					}
 				} catch (e) {
 					console.warn("Corrupted WAL line:", line);

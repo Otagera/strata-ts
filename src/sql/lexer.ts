@@ -1,4 +1,4 @@
-import { TokenType, type Token } from "../shared/interfaces";
+import { type Token, TokenType } from "../shared/interfaces";
 
 export class Lexer {
 	private source: string;
@@ -22,6 +22,9 @@ export class Lexer {
 		"TEXT",
 		"TRUE",
 		"FALSE",
+		"BEGIN",
+		"COMMIT",
+		"ROLLBACK",
 	]);
 
 	constructor(source: string) {
@@ -71,7 +74,7 @@ export class Lexer {
 	}
 
 	private advance(): string {
-		return this.source[this.cursor++];
+		return this.source[this.cursor++] || "";
 	}
 
 	private isAtEnd(): boolean {

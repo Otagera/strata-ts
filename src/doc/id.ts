@@ -17,8 +17,8 @@ export class StrataId {
 		const bRandom = randomBytes(5);
 
 		const bCounter = Buffer.alloc(3);
-		this.counter = (this.counter + 1) % 0xffffff;
-		bCounter.writeUIntBE(this.counter, 0, 3);
+		StrataId.counter = (StrataId.counter + 1) % 0xffffff;
+		bCounter.writeUIntBE(StrataId.counter, 0, 3);
 
 		return Buffer.concat([bTime, bRandom, bCounter]).toString("hex");
 	}

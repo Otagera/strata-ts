@@ -59,10 +59,25 @@ export enum NodeType {
 	BinaryExpression,
 	Literal,
 	Identifier,
+	BeginStatement,
+	CommitStatement,
+	RollbackStatement,
 }
 
 export interface ASTNode {
 	type: NodeType;
+}
+
+export interface BeginStatement extends ASTNode {
+	type: NodeType.BeginStatement;
+}
+
+export interface CommitStatement extends ASTNode {
+	type: NodeType.CommitStatement;
+}
+
+export interface RollbackStatement extends ASTNode {
+	type: NodeType.RollbackStatement;
 }
 
 export interface Identifier extends ASTNode {
@@ -122,3 +137,9 @@ export interface WALConfig {
 export type MemTable = Map<string, string>; // In-memory key-value store
 
 export type WALBatch = Map<string, string | null>; // null = tombstone
+
+export interface IKVStorageEngine {
+	database_get(key: string): Promise<string | null>;
+	commitBatch(batch: WALBatch): Promise<void>;
+	_get_db_sentinel_value(): string;
+}

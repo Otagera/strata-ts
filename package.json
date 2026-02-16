@@ -2,12 +2,14 @@
 	"devDependencies": {
 		"@biomejs/biome": "2.3.11",
 		"@types/bun": "latest",
-		"@types/node": "^25.0.9"
+		"@types/node": "^25.0.9",
+		"@types/react": "^19.2.14"
 	},
 	"name": "strata",
 	"scripts": {
 		"test": "bun test",
 		"start": "bun run src/cli.ts",
+		"dev:ui": "bun run src/server.ts --watch",
 		"check": "biome check .",
 		"check:write": "biome check . --write",
 		"lint": "biome lint .",
@@ -18,5 +20,15 @@
 	"private": true,
 	"peerDependencies": {
 		"typescript": "^5"
+	},
+	"dependencies": {
+		"@tanstack/react-query": "^5.90.21",
+		"@tanstack/react-table": "^8.21.3",
+		"autoprefixer": "^10.4.24",
+		"clsx": "^2.1.1",
+		"lucide-react": "^0.564.0",
+		"postcss": "^8.5.6",
+		"tailwind-merge": "^3.4.1",
+		"tailwindcss": "^4.1.18"
 	}
 }

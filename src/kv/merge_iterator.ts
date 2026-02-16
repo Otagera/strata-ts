@@ -14,7 +14,7 @@ export class KWayMergeIterator {
 	next = async (): Promise<Pair | null> => {
 		if (this.cursors.length === 0) return null;
 
-		let line: Pair | null = null;
+		const line: Pair | null = null;
 
 		while (this.cursors.some((c) => !c.done)) {
 			let minKey: string | null = null;
@@ -32,7 +32,7 @@ export class KWayMergeIterator {
 				}
 			}
 
-			let winner = cursorsWithMinKey[0];
+			const winner = cursorsWithMinKey[0];
 
 			if (minKey === null) return null;
 			if (!winner) return null;

@@ -1,6 +1,7 @@
 import { StrataKV } from "../kv/engine";
-import { QueryCursor, IndexQueryCursor } from "../shared/query_cursor";
+import type { Transaction } from "../kv/transaction";
 import type { StrataDocFindOptions } from "../shared/interfaces";
+import { IndexQueryCursor, QueryCursor } from "../shared/query_cursor";
 import { StrataId } from "./id";
 
 export class StrataDoc {
@@ -13,6 +14,10 @@ export class StrataDoc {
 		} else {
 			this.kv = new StrataKV(configOrKV);
 		}
+	}
+
+	public get engine(): StrataKV {
+		return this.kv;
 	}
 
 	init = async () => {
@@ -30,14 +35,14 @@ export class StrataDoc {
 		collection: string,
 		indexName: string,
 		indexValue: string,
-		id: string
+		id: string,
 	) => {
 		if (collection.includes("::") || indexName.includes("::")) {
 			throw new Error("Collection and index names cannot contain '::'");
 		}
 		// IDX::collection::field::value::id
 		return encodeURIComponent(
-			`IDX::${collection}::${indexName}::${indexValue}::${id}`
+			`IDX::${collection}::${indexName}::${indexValue}::${id}`,
 		);
 	};
 	createIndex(collection: string, field: string) {
@@ -47,11 +52,31 @@ export class StrataDoc {
 		this.indexes.get(collection)?.add(field);
 	}
 
-	insert = async (collection: string, doc: Record<string, any>) => {
-		const existing = await this.findById(collection, doc._id);
+	private _dbSet = async (key: string, value: string, tx?: Transaction) => {
+		if (tx) {
+			tx.set(key, value);
+		} else {
+			await this.kv.database_set(key, value);
+		}
+	};
+
+	private _dbDelete = async (key: string, tx?: Transaction) => {
+		if (tx) {
+			tx.delete(key);
+		} else {
+			await this.kv.database_delete(key);
+		}
+	};
+
+	insert = async (
+		collection: string,
+		doc: Record<string, any>,
+		tx?: Transaction,
+	) => {
+		const existing = await this.findById(collection, doc._id, tx);
 		if (existing) {
 			throw new Error(
-				`Document with _id ${doc._id} already exists in collection ${collection}`
+				`Document with _id ${doc._id} already exists in collection ${collection}`,
 			);
 		}
 		const _id = (doc._id || StrataId.generate()) as string;
@@ -60,40 +85,100 @@ export class StrataDoc {
 		const docWithId: Record<string, any> = { ...doc, _id };
 		const value = JSON.stringify(docWithId);
 
-		await this.kv.database_set(key, value);
+		await this._dbSet(key, value, tx);
+
 		for (const field of this.indexes.get(collection) || []) {
 			if (docWithId[field] !== undefined) {
 				const indexKey = this._makeIndexKey(
 					collection,
 					field,
 					String(docWithId[field]),
-					_id
+					_id,
 				);
-				await this.kv.database_set(indexKey, "");
+				await this._dbSet(indexKey, "", tx);
 			}
 		}
 		return docWithId;
 	};
-	update = async (collection: string, doc: Record<string, any>) => {
-		const existing = await this.findById(collection, doc._id);
+
+	update = async (
+		collection: string,
+		doc: Record<string, any>,
+		tx?: Transaction,
+	) => {
+		const existing = await this.findById(collection, doc._id, tx);
 		if (!existing) {
 			throw new Error(
-				`Document with _id ${doc._id} does not exist in collection ${collection}`
+				`Document with _id ${doc._id} does not exist in collection ${collection}`,
 			);
 		}
 		const _id = doc._id;
 		const key = this._makeKey(collection, _id);
 
+		// Handle Index Updates (Very basic: remove old, add new)
+		// Note: A real implementation would compare old and new values
 		const updatedDoc = { ...existing, ...doc };
 		const value = JSON.stringify(updatedDoc);
 
-		await this.kv.database_set(key, value);
+		await this._dbSet(key, value, tx);
+
+		// Index maintenance (Placeholder for more robust logic)
+		for (const field of this.indexes.get(collection) || []) {
+			if (doc[field] !== undefined && doc[field] !== existing[field]) {
+				// Remove old index
+				const oldIndexKey = this._makeIndexKey(
+					collection,
+					field,
+					String(existing[field]),
+					_id,
+				);
+				await this._dbDelete(oldIndexKey, tx);
+
+				// Add new index
+				const newIndexKey = this._makeIndexKey(
+					collection,
+					field,
+					String(doc[field]),
+					_id,
+				);
+				await this._dbSet(newIndexKey, "", tx);
+			}
+		}
+
 		return updatedDoc;
 	};
 
-	findById = async (collection: string, id: string) => {
+	deleteOne = async (collection: string, id: string, tx?: Transaction) => {
+		const existing = await this.findById(collection, id, tx);
+		if (!existing) return false;
+
 		const key = this._makeKey(collection, id);
-		const value = await this.kv.database_get(key);
+		await this._dbDelete(key, tx);
+
+		// Remove Indexes
+		for (const field of this.indexes.get(collection) || []) {
+			if (existing[field] !== undefined) {
+				const indexKey = this._makeIndexKey(
+					collection,
+					field,
+					String(existing[field]),
+					id,
+				);
+				await this._dbDelete(indexKey, tx);
+			}
+		}
+
+		return true;
+	};
+
+	findById = async (collection: string, id: string, tx?: Transaction) => {
+		const key = this._makeKey(collection, id);
+		let value;
+		if (tx) {
+			value = await tx.get(key);
+		} else {
+			value = await this.kv.database_get(key);
+		}
 
 		if (!value) {
 			return null;
@@ -110,7 +195,8 @@ export class StrataDoc {
 	find = (
 		collection: string,
 		query: Record<string, any>,
-		options?: StrataDocFindOptions
+		options?: StrataDocFindOptions,
+		tx?: Transaction,
 	) => {
 		const docPrefix = this._makeKey(collection, "");
 		const indexes = this.indexes.get(collection);
@@ -124,13 +210,13 @@ export class StrataDoc {
 						collection,
 						field,
 						String(queryVal),
-						""
+						"",
 					);
 					const cursor = new IndexQueryCursor(
 						this.kv,
 						docPrefix,
 						query,
-						indexPrefix
+						indexPrefix,
 					);
 					if (options?.limit) {
 						cursor.limit(options.limit);

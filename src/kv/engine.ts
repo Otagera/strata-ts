@@ -14,10 +14,11 @@ import {
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { BloomFilter } from "../shared/bloom_filter";
-import { SSTIterator } from "./sst_iterator";
+import type { BlockIndex, MemTable, WALBatch } from "../shared/interfaces";
 import { MemTableIterator } from "./mem_table_iterator";
 import { KWayMergeIterator } from "./merge_iterator";
-import type { BlockIndex, MemTable, WALBatch } from "../shared/interfaces";
+import { SSTIterator } from "./sst_iterator";
+import { Transaction } from "./transaction";
 import { WALManager } from "./wal";
 
 // --- Interfaces ---
@@ -43,7 +44,7 @@ export class StrataKV {
 
 	private sst_files: SSTMetadata[] = [];
 	private mem_table: MemTable = new Map();
-	private wal_instance: WALManager;
+	private wal_instance!: WALManager;
 
 	constructor(config?: {
 		dataDir?: string;
@@ -85,14 +86,14 @@ export class StrataKV {
 
 			const sorted_files = await this.readDirSortedByTime(
 				this.DATA_DIR,
-				files.filter((file) => file.endsWith(this.SST_FILE_EXT))
+				files.filter((file) => file.endsWith(this.SST_FILE_EXT)),
 			);
 
 			this.sst_files = await Promise.all(
 				sorted_files.map(async (filename) => {
 					const meta = await this.get_file_meta(filename);
 					return { ...meta, filename };
-				})
+				}),
 			);
 
 			if (this.WAL_ENABLED) {
@@ -127,7 +128,7 @@ export class StrataKV {
 					if (sst.filter.contains(key)) {
 						const cursor = new SSTIterator(
 							path.join(this.DATA_DIR, sst.filename),
-							sst.filename
+							sst.filename,
 						);
 						await cursor.seek(key);
 
@@ -154,7 +155,7 @@ export class StrataKV {
 		if (this.WAL_ENABLED) {
 			await this.wal_instance.appendBatch(
 				new Map([[key, value]]),
-				crypto.randomUUID()
+				crypto.randomUUID(),
 			);
 		}
 		this.mem_table.set(key, value);
@@ -169,7 +170,7 @@ export class StrataKV {
 		if (this.WAL_ENABLED) {
 			await this.wal_instance.appendBatch(
 				new Map([[key, this.DB_SENTINEL_VALUE]]),
-				crypto.randomUUID()
+				crypto.randomUUID(),
 			);
 		}
 		this.mem_table.set(key, this.DB_SENTINEL_VALUE);
@@ -187,24 +188,32 @@ export class StrataKV {
 		this._reset_db_state();
 	};
 
+	public beginTransaction(): Transaction {
+		return new Transaction(this);
+	}
+
 	public commitBatch = async (batch: WALBatch) => {
-		this.acquireLock();
+		await this.acquireLock();
 
-		if (this.WAL_ENABLED) {
-			await this.wal_instance.appendBatch(batch, crypto.randomUUID());
-		}
-
-		for (const [key, value] of batch) {
-			if (value === null) {
-				this.mem_table.set(key, this.DB_SENTINEL_VALUE);
-			} else {
-				this.mem_table.set(key, value);
+		try {
+			if (this.WAL_ENABLED) {
+				await this.wal_instance.appendBatch(batch, crypto.randomUUID());
 			}
+
+			for (const [key, value] of batch) {
+				if (value === null || value === this.DB_SENTINEL_VALUE) {
+					this.mem_table.set(key, this.DB_SENTINEL_VALUE);
+				} else {
+					this.mem_table.set(key, value);
+				}
+			}
+
+			if (this.mem_table.size >= this.MEMTABLE_LIMIT) {
+				await this.flush_mem_table();
+			}
+		} finally {
+			this.releaseLock();
 		}
-		if (this.mem_table.size >= this.MEMTABLE_LIMIT) {
-			return this.flush_mem_table();
-		}
-		this.releaseLock();
 	};
 
 	// --- Private Helpers ---
@@ -249,7 +258,7 @@ export class StrataKV {
 					maxKey,
 					filterData: filter.serialize(),
 					blockIndex: block_index,
-				})
+				}),
 			);
 			this.sst_files.unshift({
 				filename,
@@ -300,7 +309,7 @@ export class StrataKV {
 	private get_file_meta = async (filename: string) => {
 		const metaPath = path.join(
 			this.DATA_DIR,
-			filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT)
+			filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT),
 		);
 		const file = await readFile(metaPath, { encoding: this.ENCODING });
 		const data = JSON.parse(file);
@@ -318,7 +327,7 @@ export class StrataKV {
 			files.map(async (filename) => {
 				const file_stat = await stat(path.join(dirpath, filename));
 				return { filename, mtime: file_stat.mtime.getTime() };
-			})
+			}),
 		);
 
 		stats.sort((a, b) => b.mtime - a.mtime);
@@ -332,11 +341,11 @@ export class StrataKV {
 			this.sst_files.map(async (file) => {
 				const cursor = new SSTIterator(
 					path.join(this.DATA_DIR, file.filename),
-					file.filename
+					file.filename,
 				);
 				await cursor.init();
 				return cursor;
-			})
+			}),
 		);
 
 		const timestamp = Date.now();
@@ -387,7 +396,7 @@ export class StrataKV {
 					maxKey: maxKeyGlobal,
 					filterData: filter.serialize(),
 					blockIndex: block_index,
-				})
+				}),
 			);
 
 			await rename(temp_output_path, path.join(this.DATA_DIR, output_filename));
@@ -423,7 +432,7 @@ export class StrataKV {
 			if (!prefix || maxKey >= prefix) {
 				const cursor = new SSTIterator(
 					path.join(this.DATA_DIR, filename),
-					filename
+					filename,
 				);
 				if (prefix) {
 					await cursor.seek(prefix);
@@ -437,7 +446,7 @@ export class StrataKV {
 
 		const sst_cursors = await Promise.all(sst_cursors_promises);
 		const valid_sst_cursors = sst_cursors.filter(
-			(cursor): cursor is SSTIterator => cursor !== undefined
+			(cursor): cursor is SSTIterator => cursor !== undefined,
 		);
 		const cursors = [mem_table_cursor, ...valid_sst_cursors];
 		const merger = new KWayMergeIterator(cursors, this.DB_SENTINEL_VALUE);
@@ -486,8 +495,8 @@ export class StrataKV {
 			await unlink(
 				path.join(
 					this.DATA_DIR,
-					file.filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT)
-				)
+					file.filename.replace(this.SST_FILE_EXT, this.SST_META_FILE_EXT),
+				),
 			);
 		}
 	};

@@ -27,7 +27,8 @@ export class BloomFilter {
 			const byteIndex = Math.floor(bitIndex / 8);
 			const bitOffset = bitIndex % 8;
 
-			if ((this.bitArray[byteIndex] & (1 << bitOffset)) === 0) {
+			const byte = this.bitArray[byteIndex];
+			if (byte === undefined || (byte & (1 << bitOffset)) === 0) {
 				return false;
 			}
 		}

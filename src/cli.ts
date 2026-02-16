@@ -136,7 +136,7 @@ async function handleDocFind(db: StrataDoc, line: string) {
 
 	// Extract JSON part (everything after collection)
 	const match = line.match(/^FIND\s+\S+\s+(.*)$/i);
-	const jsonStr = match ? match[1] : "{}";
+	const jsonStr = (match ? match[1] : "{}") || "{}";
 
 	const query = JSON.parse(jsonStr);
 	const results = await db.find(collection, query).limit(20).toArray();
@@ -148,7 +148,7 @@ async function handleDocFind(db: StrataDoc, line: string) {
 async function handleDocGet(db: StrataDoc, parts: string[]) {
 	// GET <collection> <id>
 	const collection = parts[1];
-	id = parts[2];
+	const id = parts[2];
 	if (!collection || !id) throw new Error("Usage: GET <collection> <id>");
 
 	const result = await db.findById(collection, id);
@@ -170,7 +170,7 @@ async function handleKV(
 	kv: StrataKV,
 	cmd: string,
 	parts: string[],
-	line: string
+	line: string,
 ) {
 	// KV commands might have simple args (GET) or complex values (SET)
 

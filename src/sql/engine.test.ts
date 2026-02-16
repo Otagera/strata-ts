@@ -1,7 +1,7 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { StrataSQL } from "./engine";
-import { StrataDoc } from "../doc/engine";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
+import { StrataDoc } from "../doc/engine";
+import { StrataSQL } from "./engine";
 
 const TEST_DIR = "test_data_sql_robust";
 
@@ -34,14 +34,14 @@ describe("Strata SQL Engine", () => {
 			await sql.execute("CREATE TABLE users (id INT)");
 			// Should throw
 			expect(sql.execute("CREATE TABLE users (age INT)")).rejects.toThrow(
-				"Table 'users' already exists"
+				"Table 'users' already exists",
 			);
 		});
 
 		test("fails with invalid types", async () => {
 			// Parser catches this because BLOB is not a Keyword
 			expect(sql.execute("CREATE TABLE bad (id BLOB)")).rejects.toThrow(
-				"Expected column type. Found BLOB"
+				"Expected column type. Found BLOB",
 			);
 		});
 	});
@@ -53,7 +53,7 @@ describe("Strata SQL Engine", () => {
 
 		test("successfully inserts valid data", async () => {
 			await sql.execute(
-				"INSERT INTO users (id, name, active) VALUES (1, 'Neo', true)"
+				"INSERT INTO users (id, name, active) VALUES (1, 'Neo', true)",
 			);
 			const res = await sql.execute("SELECT * FROM users");
 			expect(res.length).toBe(1);
@@ -62,7 +62,7 @@ describe("Strata SQL Engine", () => {
 
 		test("fails when table does not exist", async () => {
 			expect(sql.execute("INSERT INTO ghosts (id) VALUES (1)")).rejects.toThrow(
-				"Table 'ghosts' does not exist"
+				"Table 'ghosts' does not exist",
 			);
 		});
 
@@ -77,36 +77,38 @@ describe("Strata SQL Engine", () => {
 
 			// Actually, let's test "Missing Column" first
 			expect(
-				sql.execute("INSERT INTO users (id, name) VALUES (1, 'Neo')")
+				sql.execute("INSERT INTO users (id, name) VALUES (1, 'Neo')"),
 			).rejects.toThrow("Missing value for column 'active'");
 		});
 
 		test("fails with type mismatch (INT expected)", async () => {
 			expect(
 				sql.execute(
-					"INSERT INTO users (id, name, active) VALUES ('one', 'Neo', true)"
-				)
+					"INSERT INTO users (id, name, active) VALUES ('one', 'Neo', true)",
+				),
 			).rejects.toThrow("Invalid type for column 'id': expected INT");
 		});
 
 		test("fails with type mismatch (BOOL expected)", async () => {
 			expect(
 				sql.execute(
-					"INSERT INTO users (id, name, active) VALUES (1, 'Neo', 123)"
-				)
+					"INSERT INTO users (id, name, active) VALUES (1, 'Neo', 123)",
+				),
 			).rejects.toThrow("Invalid type for column 'active': expected BOOL");
 		});
 
 		test("fails on column count mismatch (Parser level)", async () => {
 			expect(
-				sql.execute("INSERT INTO users (id) VALUES (1, 2)")
+				sql.execute("INSERT INTO users (id) VALUES (1, 2)"),
 			).rejects.toThrow("Column count (1) does not match value count (2)");
 		});
 
 		test("fails when inserting extra column not in schema", async () => {
 			// 'hobby' is not in schema
 			expect(
-				sql.execute("INSERT INTO users (id, name, active, hobby) VALUES (1, 'Neo', true, 'hacking')")
+				sql.execute(
+					"INSERT INTO users (id, name, active, hobby) VALUES (1, 'Neo', true, 'hacking')",
+				),
 			).rejects.toThrow("Column 'hobby' does not exist in table 'users'");
 		});
 	});
@@ -132,7 +134,7 @@ describe("Strata SQL Engine", () => {
 
 		test("SELECT with WHERE (AND logic)", async () => {
 			const res = await sql.execute(
-				"SELECT * FROM items WHERE price > 50 AND price < 200"
+				"SELECT * FROM items WHERE price > 50 AND price < 200",
 			);
 			expect(res.length).toBe(1);
 			expect(res[0].id).toBe(1); // 100
@@ -140,13 +142,13 @@ describe("Strata SQL Engine", () => {
 
 		test("fails when querying non-existent table", async () => {
 			expect(sql.execute("SELECT * FROM missing")).rejects.toThrow(
-				"Table 'missing' does not exist"
+				"Table 'missing' does not exist",
 			);
 		});
 
 		test("fails when querying non-existent column in SELECT list", async () => {
 			expect(sql.execute("SELECT SKU FROM items")).rejects.toThrow(
-				"Column 'SKU' does not exist"
+				"Column 'SKU' does not exist",
 			);
 		});
 

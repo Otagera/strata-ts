@@ -1,5 +1,5 @@
-import { StrataDoc } from "../doc/engine";
-import { type ColumnDefinition, type TableSchema } from "../shared/interfaces";
+import type { StrataDoc } from "../doc/engine";
+import type { ColumnDefinition, TableSchema } from "../shared/interfaces";
 
 export class SystemCatalog {
 	private doc: StrataDoc;

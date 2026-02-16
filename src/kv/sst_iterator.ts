@@ -1,9 +1,9 @@
 import { createReadStream } from "node:fs";
-import { createInterface, type Interface } from "node:readline/promises";
-import type { BlockIndex, IKVIterator, Pair } from "../shared/interfaces";
-import path from "node:path";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { createInterface, type Interface } from "node:readline/promises";
 import { BloomFilter } from "../shared/bloom_filter";
+import type { BlockIndex, IKVIterator, Pair } from "../shared/interfaces";
 
 export class SSTIterator implements IKVIterator {
 	private rl: Interface;
@@ -96,7 +96,7 @@ export class SSTIterator implements IKVIterator {
 
 		const metaPath = path.join(
 			this.DATA_DIR,
-			filename.replace(SST_FILE_EXT, SST_META_FILE_EXT)
+			filename.replace(SST_FILE_EXT, SST_META_FILE_EXT),
 		);
 		const file = await readFile(metaPath, { encoding: this.ENCODING });
 		const data = JSON.parse(file);

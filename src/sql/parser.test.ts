@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import {
+	type BinaryExpression,
+	type Literal,
+	NodeType,
+	type SelectStatement,
+} from "../shared/interfaces";
 import { Lexer } from "./lexer";
 import { Parser } from "./parser";
-import { NodeType, type SelectStatement, type BinaryExpression, type Literal } from "../shared/interfaces";
 
 describe("SQL Parser", () => {
 	test("Parses SELECT * FROM users", () => {
@@ -39,13 +44,15 @@ describe("SQL Parser", () => {
 	});
 
 	test("Parses Complex WHERE (AND)", () => {
-		const lexer = new Lexer("SELECT * FROM users WHERE age > 18 AND role = 'admin'");
+		const lexer = new Lexer(
+			"SELECT * FROM users WHERE age > 18 AND role = 'admin'",
+		);
 		const parser = new Parser(lexer);
 		const ast = parser.parse() as SelectStatement;
 
 		const where = ast.where as BinaryExpression;
 		expect(where.operator).toBe("AND");
-		
+
 		// Check Left (age > 18)
 		const left = where.left as BinaryExpression;
 		expect(left.operator).toBe(">");

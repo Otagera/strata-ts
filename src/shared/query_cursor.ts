@@ -6,7 +6,7 @@ export class QueryCursor {
 	constructor(
 		protected kv: StrataKV,
 		protected prefix: string,
-		protected query: Record<string, any>
+		protected query: Record<string, any>,
 	) {}
 
 	limit(n: number) {
@@ -93,9 +93,7 @@ export class QueryCursor {
 					count++;
 					if (this._limit && count >= this._limit) break;
 				}
-			} catch (error) {
-				continue;
-			}
+			} catch (error) {}
 		}
 	}
 }
@@ -105,7 +103,7 @@ export class IndexQueryCursor extends QueryCursor {
 		kv: StrataKV,
 		prefix: string,
 		query: Record<string, any>,
-		private indexPrefix: string
+		private indexPrefix: string,
 	) {
 		super(kv, prefix, query);
 	}
@@ -134,9 +132,7 @@ export class IndexQueryCursor extends QueryCursor {
 					count++;
 					if (this._limit && count >= this._limit) break;
 				}
-			} catch (error) {
-				continue;
-			}
+			} catch (error) {}
 		}
 	}
 }
