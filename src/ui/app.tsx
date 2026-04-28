@@ -1,30 +1,30 @@
-import React, { useState, useEffect } from "react";
-import { createRoot } from "react-dom/client";
 import {
 	QueryClient,
 	QueryClientProvider,
-	useQuery,
 	useMutation,
+	useQuery,
 } from "@tanstack/react-query";
 import {
-	Terminal,
+	Activity,
+	Box,
 	Database,
 	Layers,
-	Zap,
-	Activity,
 	RefreshCcw,
 	Table as TableIcon,
-	Box,
+	Terminal,
+	Zap,
 } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
 
 import { SidebarItem, StatCard } from "./components/Common.tsx";
-import { Workbench } from "./components/Workbench.tsx";
 import {
-	TableView,
-	KVExplorer,
 	CollectionGrid,
+	KVExplorer,
+	TableView,
 } from "./components/Explorers.tsx";
 import { Monitoring } from "./components/Monitoring.tsx";
+import { Workbench } from "./components/Workbench.tsx";
 
 const queryClient = new QueryClient();
 
@@ -136,7 +136,7 @@ export default function App() {
 			<aside className="w-64 border-r border-spacetime flex flex-col">
 				<div
 					className="p-6 flex items-center gap-2 mb-4 cursor-pointer"
-					onClick={() => setView("workbench")}
+					onClick={() => (window.location.href = "/")}
 				>
 					<div className="w-8 h-8 bg-green-600 rounded flex items-center justify-center font-bold text-white italic">
 						S
@@ -237,6 +237,6 @@ if (rootElement) {
 	root.render(
 		<QueryClientProvider client={queryClient}>
 			<App />
-		</QueryClientProvider>
+		</QueryClientProvider>,
 	);
 }

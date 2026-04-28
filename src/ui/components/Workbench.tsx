@@ -75,7 +75,9 @@ export const Workbench = ({
 			<div className="flex-1 flex divide-x divide-spacetime overflow-hidden">
 				<div className="flex-1 flex flex-col bg-spacetime overflow-hidden">
 					<div className="bg-[#161b22] px-4 py-1 border-b border-spacetime text-[10px] text-spacetime-dim uppercase tracking-wider">
-						Results {results?.duration !== undefined && `(${results.duration.toFixed(2)}ms)`}
+						Results{" "}
+						{results?.duration !== undefined &&
+							`(${results.duration.toFixed(2)}ms)`}
 					</div>
 					<div className="flex-1 p-4 overflow-auto font-mono text-xs">
 						{executeMutation.isError && (

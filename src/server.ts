@@ -1,6 +1,7 @@
 import path from "node:path";
-import { manager, clients, patchEngine } from "./server/manager";
+import { clients, manager, patchEngine } from "./server/manager";
 import index from "./ui/index.html";
+import landing from "./ui/landing.html";
 
 // Initialize the default space
 await patchEngine("default");
@@ -8,7 +9,8 @@ await patchEngine("default");
 const server = Bun.serve({
 	port: 2345,
 	routes: {
-		"/": index,
+		"/": landing,
+		"/workbench": index,
 	},
 	async fetch(req, server) {
 		const url = new URL(req.url);
@@ -16,13 +18,16 @@ const server = Bun.serve({
 		const { kv, doc, sql } = await manager.getSpace(spaceId);
 
 		// --- API Routes ---
-		
+
 		if (url.pathname === "/api/status") {
-			return new Response(JSON.stringify({
-				memTableSize: kv._get_db_size(),
-				sstCount: (kv as any).sst_files.length,
-				spaceId,
-			}), { headers: { "Content-Type": "application/json" } });
+			return new Response(
+				JSON.stringify({
+					memTableSize: kv._get_db_size(),
+					sstCount: (kv as any).sst_files.length,
+					spaceId,
+				}),
+				{ headers: { "Content-Type": "application/json" } },
+			);
 		}
 
 		if (url.pathname === "/api/query" && req.method === "POST") {
@@ -34,11 +39,11 @@ const server = Bun.serve({
 			}
 			const parts = query.split(/\s+/);
 			const cmd = parts[0]?.toUpperCase();
-			
+
 			const start = performance.now();
 			try {
 				let result: any;
-				
+
 				// Dispatch logic inspired by cli.ts
 				if (["SELECT", "CREATE", "BEGIN", "COMMIT", "ROLLBACK"].includes(cmd)) {
 					result = await sql.execute(query);
@@ -48,13 +53,18 @@ const server = Bun.serve({
 					} else {
 						// Doc Insert: INSERT <collection> <json>
 						const collection = parts[1];
-						const jsonStr = query.substring(query.indexOf(collection) + collection.length).trim();
+						const jsonStr = query
+							.substring(query.indexOf(collection) + collection.length)
+							.trim();
 						result = await doc.insert(collection, JSON.parse(jsonStr));
 					}
 				} else if (cmd === "FIND") {
 					// FIND <collection> <query>
 					const collection = parts[1];
-					const jsonStr = query.substring(query.indexOf(collection) + collection.length).trim() || "{}";
+					const jsonStr =
+						query
+							.substring(query.indexOf(collection) + collection.length)
+							.trim() || "{}";
 					result = await doc.find(collection, JSON.parse(jsonStr)).toArray();
 				} else if (cmd === "GET") {
 					result = await doc.findById(parts[1], parts[2]);
@@ -79,12 +89,22 @@ const server = Bun.serve({
 				}
 
 				const duration = performance.now() - start;
-				return new Response(JSON.stringify({ success: true, result, duration }), { headers: { "Content-Type": "application/json" } });
+				return new Response(
+					JSON.stringify({ success: true, result, duration }),
+					{ headers: { "Content-Type": "application/json" } },
+				);
 			} catch (e: any) {
-				return new Response(JSON.stringify({ success: false, error: e.message, duration: performance.now() - start }), { 
-					status: 400,
-					headers: { "Content-Type": "application/json" } 
-				});
+				return new Response(
+					JSON.stringify({
+						success: false,
+						error: e.message,
+						duration: performance.now() - start,
+					}),
+					{
+						status: 400,
+						headers: { "Content-Type": "application/json" },
+					},
+				);
 			}
 		}
 
@@ -95,43 +115,66 @@ const server = Bun.serve({
 				results.push(entry);
 				if (results.length >= 100) break;
 			}
-			return new Response(JSON.stringify(results), { headers: { "Content-Type": "application/json" } });
+			return new Response(JSON.stringify(results), {
+				headers: { "Content-Type": "application/json" },
+			});
 		}
 
 		if (url.pathname === "/api/tables") {
 			const tables = await (sql as any).systemCatalog.listTables();
-			const schemas = await Promise.all(tables.map((t: string) => (sql as any).systemCatalog.getTable(t)));
-			return new Response(JSON.stringify(schemas), { headers: { "Content-Type": "application/json" } });
+			const schemas = await Promise.all(
+				tables.map((t: string) => (sql as any).systemCatalog.getTable(t)),
+			);
+			return new Response(JSON.stringify(schemas), {
+				headers: { "Content-Type": "application/json" },
+			});
 		}
 
 		if (url.pathname === "/api/collections") {
 			const collections = new Set<string>();
 			for await (const entry of kv.scan()) {
 				const key = decodeURIComponent(entry.key);
-				if (key.includes("::") && !key.startsWith("IDX::") && !key.startsWith("_schema::")) {
+				if (
+					key.includes("::") &&
+					!key.startsWith("IDX::") &&
+					!key.startsWith("_schema::")
+				) {
 					const parts = key.split("::");
 					if (parts[0]) {
 						collections.add(parts[0]);
 					}
 				}
 			}
-			return new Response(JSON.stringify(Array.from(collections)), { headers: { "Content-Type": "application/json" } });
+			return new Response(JSON.stringify(Array.from(collections)), {
+				headers: { "Content-Type": "application/json" },
+			});
 		}
 
 		if (url.pathname === "/api/seed" && req.method === "POST") {
 			try {
-				await sql.execute("CREATE TABLE users (id INT, name TEXT, active BOOL)");
-				await sql.execute("INSERT INTO users (id, name, active) VALUES (1, 'Neo', true)");
-				await sql.execute("INSERT INTO users (id, name, active) VALUES (2, 'Morpheus', true)");
+				await sql.execute(
+					"CREATE TABLE users (id INT, name TEXT, active BOOL)",
+				);
+				await sql.execute(
+					"INSERT INTO users (id, name, active) VALUES (1, 'Neo', true)",
+				);
+				await sql.execute(
+					"INSERT INTO users (id, name, active) VALUES (2, 'Morpheus', true)",
+				);
 				await doc.insert("items", { name: "Red Pill", power: 9000 });
 				await doc.insert("items", { name: "Blue Pill", power: 0 });
 				await kv.database_set("system:status", "online");
-				return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json" } });
-			} catch (e: any) {
-				return new Response(JSON.stringify({ success: false, error: e.message }), { 
-					status: 400,
-					headers: { "Content-Type": "application/json" } 
+				return new Response(JSON.stringify({ success: true }), {
+					headers: { "Content-Type": "application/json" },
 				});
+			} catch (e: any) {
+				return new Response(
+					JSON.stringify({ success: false, error: e.message }),
+					{
+						status: 400,
+						headers: { "Content-Type": "application/json" },
+					},
+				);
 			}
 		}
 
@@ -142,8 +185,19 @@ const server = Bun.serve({
 		}
 
 		// Fallback for SPA routing or other assets
-		if (url.pathname === "/" || !url.pathname.includes(".")) {
-			return new Response(await (index as any).text(), { headers: { "Content-Type": "text/html" } });
+		if (
+			url.pathname === "/workbench" ||
+			(url.pathname.startsWith("/workbench/") && !url.pathname.includes("."))
+		) {
+			return new Response(await (index as any).text(), {
+				headers: { "Content-Type": "text/html" },
+			});
+		}
+
+		if (url.pathname === "/") {
+			return new Response(await (landing as any).text(), {
+				headers: { "Content-Type": "text/html" },
+			});
 		}
 
 		const filePath = path.join("src/ui", url.pathname);
@@ -155,9 +209,13 @@ const server = Bun.serve({
 		return new Response("Not Found", { status: 404 });
 	},
 	websocket: {
-		open(ws) { clients.add(ws); },
+		open(ws) {
+			clients.add(ws);
+		},
 		message(ws, msg) {},
-		close(ws) { clients.delete(ws); },
+		close(ws) {
+			clients.delete(ws);
+		},
 	},
 });
 

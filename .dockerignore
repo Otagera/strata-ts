@@ -1,0 +1,9 @@
+node_modules
+.beads
+.git
+.vscode
+data
+data_demo
+data_doc_test
+.env
+*.log
